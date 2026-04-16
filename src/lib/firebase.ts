@@ -2,8 +2,9 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import firebaseAppletConfig from '@/firebase-applet-config.json';
 
-const firebaseConfig = {
+const envFirebaseConfig = {
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -13,23 +14,33 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || undefined,
 };
 
-const firestoreDatabaseId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID;
+const envFirestoreDatabaseId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID;
 
-const missingEnvVars = [
-  ['VITE_FIREBASE_PROJECT_ID', firebaseConfig.projectId],
-  ['VITE_FIREBASE_APP_ID', firebaseConfig.appId],
-  ['VITE_FIREBASE_API_KEY', firebaseConfig.apiKey],
-  ['VITE_FIREBASE_AUTH_DOMAIN', firebaseConfig.authDomain],
-  ['VITE_FIREBASE_STORAGE_BUCKET', firebaseConfig.storageBucket],
-  ['VITE_FIREBASE_MESSAGING_SENDER_ID', firebaseConfig.messagingSenderId],
-  ['VITE_FIREBASE_FIRESTORE_DATABASE_ID', firestoreDatabaseId],
-].filter(([, value]) => !value);
+const hasCompleteEnvConfig = Boolean(
+  envFirebaseConfig.projectId &&
+    envFirebaseConfig.appId &&
+    envFirebaseConfig.apiKey &&
+    envFirebaseConfig.authDomain &&
+    envFirebaseConfig.storageBucket &&
+    envFirebaseConfig.messagingSenderId &&
+    envFirestoreDatabaseId,
+);
 
-if (missingEnvVars.length > 0) {
-  throw new Error(
-    `Missing Firebase environment variables: ${missingEnvVars.map(([name]) => name).join(', ')}`,
-  );
-}
+const firebaseConfig = hasCompleteEnvConfig
+  ? envFirebaseConfig
+  : {
+      projectId: firebaseAppletConfig.projectId,
+      appId: firebaseAppletConfig.appId,
+      apiKey: firebaseAppletConfig.apiKey,
+      authDomain: firebaseAppletConfig.authDomain,
+      storageBucket: firebaseAppletConfig.storageBucket,
+      messagingSenderId: firebaseAppletConfig.messagingSenderId,
+      measurementId: firebaseAppletConfig.measurementId || undefined,
+    };
+
+const firestoreDatabaseId = hasCompleteEnvConfig
+  ? envFirestoreDatabaseId
+  : firebaseAppletConfig.firestoreDatabaseId;
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);

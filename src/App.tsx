@@ -8,10 +8,12 @@ import { auth, db } from './lib/firebase';
 import { UserProfile } from './types';
 
 import PublicDashboard from './components/PublicDashboard';
+import LandingPage from './components/LandingPage';
 import TeacherDashboard from './components/TeacherDashboard';
 import AdminDashboard from './components/AdminDashboard';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import Login from './components/Login';
+import foundationLogo from './assets/foundation-logo.png';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -108,16 +110,22 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex items-center">
-              <Link to="/" className="flex items-center space-x-2">
-                <div className="w-10 h-10 bg-dltt-green rounded-lg flex items-center justify-center">
-                  <span className="text-dltt-yellow font-bold text-xl">D</span>
+              <Link to="/" className="flex items-center space-x-3">
+                <div className="w-11 h-11 rounded-xl overflow-hidden shadow-sm border border-slate-100 bg-white">
+                  <img src={foundationLogo} alt="Foundation logo placeholder" className="w-full h-full object-cover" />
                 </div>
-                <span className="text-xl font-bold text-gray-900 hidden sm:block">DLTT Portal</span>
+                <div className="hidden sm:block">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-dltt-green">DEFINED Project</p>
+                  <span className="text-xl font-bold text-gray-900">DLTT Portal</span>
+                </div>
               </Link>
             </div>
 
             <div className="hidden md:flex items-center space-x-8">
               <Link to="/" className="text-gray-600 hover:text-dltt-green font-medium transition-colors">
+                Home
+              </Link>
+              <Link to="/stats" className="text-gray-600 hover:text-dltt-green font-medium transition-colors">
                 Stats
               </Link>
               {user ? (
@@ -170,6 +178,13 @@ export default function App() {
               <div className="px-4 pt-2 pb-6 space-y-2">
                 <Link
                   to="/"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Home
+                </Link>
+                <Link
+                  to="/stats"
                   onClick={() => setIsMenuOpen(false)}
                   className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-50"
                 >
@@ -230,7 +245,8 @@ export default function App() {
           </div>
         ) : (
           <Routes>
-            <Route path="/" element={<PublicDashboard />} />
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/stats" element={<PublicDashboard />} />
             <Route
               path="/login"
               element={
