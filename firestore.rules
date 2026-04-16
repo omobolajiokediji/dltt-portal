@@ -1,0 +1,161 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (auth.uid)
+    // Fields:
+    //   - uid: string (required)
+    //   - name: string (required)
+    //   - email: string (optional)
+    //   - phone: string (optional)
+    //   - role: string (required, enum: super-admin, admin, teacher)
+    //   - state: string (required)
+    //   - school: string (optional)
+    //   - profilePhoto: string (optional)
+    //   - certificateName: string (optional)
+    //   - approvedForCertificate: bool (optional)
+    //   - totalScore: number (optional)
+    //   - attendance: map (optional)
+    //   - assignmentCompletion: map (optional)
+    //
+    // Collection: materials
+    // Document ID: materialId
+    // Fields:
+    //   - id: string (required)
+    //   - title: string (required)
+    //   - description: string (optional)
+    //   - type: string (required, enum: slide, pdf, assignment)
+    //   - contentUrl: string (required)
+    //   - assignedTo: list (required)
+    //   - assignedStates: list (required)
+    //   - dueDate: string (optional)
+    //   - week: number (required)
+    //   - createdAt: string (required)
+    //
+    // Collection: submissions
+    // Document ID: submissionId
+    // Fields:
+    //   - id: string (required)
+    //   - teacherId: string (required)
+    //   - materialId: string (required)
+    //   - contentUrl: string (required)
+    //   - submittedAt: string (required)
+    //   - score: number (optional)
+    //   - feedback: string (optional)
+    //   - status: string (required, enum: pending, graded)
+    //
+    // Collection: stats
+    // Document ID: global
+    // Fields:
+    //   - enrollment: number
+    //   - completionRate: number
+    //   - stateLeaderboard: list
+    //   - teacherLeaderboard: list
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && getUserData().role == role;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (request.auth.token.email == "omobolajiokediji@gmail.com" || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super-admin']));
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (request.auth.token.email == "omobolajiokediji@gmail.com" || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super-admin'));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'role', 'state']) &&
+             data.uid is string &&
+             data.name is string && data.name.size() < 100 &&
+             data.role in ['super-admin', 'admin', 'teacher'] &&
+             data.state is string;
+    }
+
+    function isValidUserUpdate() {
+      let nextData = request.resource.data;
+      return nextData.uid is string &&
+             nextData.name is string && nextData.name.size() < 100 &&
+             nextData.role in ['super-admin', 'admin', 'teacher'] &&
+             nextData.state is string;
+    }
+
+    function isValidMaterial(data) {
+      return data.keys().hasAll(['id', 'title', 'type', 'contentUrl', 'week']) &&
+             data.title is string && data.title.size() < 200 &&
+             data.type in ['slide', 'pdf', 'assignment'] &&
+             data.contentUrl is string &&
+             data.week is number;
+    }
+
+    function isValidSubmission(data) {
+      return data.keys().hasAll(['id', 'teacherId', 'materialId', 'contentUrl', 'submittedAt', 'status']) &&
+             data.id is string &&
+             data.teacherId == request.auth.uid &&
+             data.materialId is string &&
+             data.contentUrl is string &&
+             data.submittedAt is string &&
+             data.status == 'pending';
+    }
+
+    function teacherCanUpdateSubmission() {
+      return isAuthenticated() &&
+             resource.data.teacherId == request.auth.uid &&
+             resource.data.status == 'pending' &&
+             request.resource.data.teacherId == resource.data.teacherId &&
+             request.resource.data.materialId == resource.data.materialId &&
+             request.resource.data.status == 'pending' &&
+             request.resource.data.id == resource.data.id;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if (isAdmin() || isSuperAdmin()) && isValidUser(request.resource.data);
+      allow update: if (isAdmin() || isSuperAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role)) && isValidUserUpdate();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /materials/{materialId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    match /submissions/{submissionId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.teacherId) || isAdmin() || isSuperAdmin());
+      allow create: if isAuthenticated() && isValidSubmission(request.resource.data);
+      allow update: if ((isAdmin() || isSuperAdmin()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['score', 'feedback', 'status'])) ||
+                    (teacherCanUpdateSubmission() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['contentUrl', 'submittedAt']));
+      allow delete: if isSuperAdmin();
+    }
+
+    match /stats/{docId} {
+      allow read: if true; // Public dashboard
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+  }
+}

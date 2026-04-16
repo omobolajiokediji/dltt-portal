@@ -1,0 +1,88 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores profile information for teachers and admins.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["super-admin", "admin", "teacher"] },
+        "state": { "type": "string" },
+        "school": { "type": "string" },
+        "profilePhoto": { "type": "string" },
+        "certificateName": { "type": "string" },
+        "approvedForCertificate": { "type": "boolean" },
+        "totalScore": { "type": "number" },
+        "attendance": { "type": "object" },
+        "assignmentCompletion": { "type": "object" }
+      },
+      "required": ["uid", "name", "role", "state"]
+    },
+    "LearningMaterial": {
+      "title": "Learning Material",
+      "description": "Slides, PDFs, or assignments uploaded by admins.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["slide", "pdf", "assignment"] },
+        "contentUrl": { "type": "string" },
+        "assignedTo": { "type": "array" },
+        "assignedStates": { "type": "array" },
+        "dueDate": { "type": "string" },
+        "week": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "type", "contentUrl", "week"]
+    },
+    "Submission": {
+      "title": "Assignment Submission",
+      "description": "Submissions made by teachers for assignments.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "materialId": { "type": "string" },
+        "contentUrl": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "score": { "type": "number" },
+        "feedback": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "graded"] }
+      },
+      "required": ["id", "teacherId", "materialId", "contentUrl", "submittedAt", "status"]
+    },
+    "Stats": {
+      "title": "Training Statistics",
+      "description": "Aggregated statistics for the public dashboard.",
+      "type": "object",
+      "properties": {
+        "enrollment": { "type": "number" },
+        "completionRate": { "type": "number" },
+        "stateLeaderboard": { "type": "array" },
+        "teacherLeaderboard": { "type": "array" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles indexed by UID."
+    },
+    "/materials/{materialId}": {
+      "schema": "LearningMaterial",
+      "description": "Learning materials and assignments."
+    },
+    "/submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "Assignment submissions."
+    },
+    "/stats/global": {
+      "schema": "Stats",
+      "description": "Global training statistics."
+    }
+  }
+}
