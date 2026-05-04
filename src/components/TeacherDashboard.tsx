@@ -524,6 +524,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                 <input
                   type="tel"
                   name="phone"
+                  readOnly
                   defaultValue={user.phone}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
                   placeholder="080..."
