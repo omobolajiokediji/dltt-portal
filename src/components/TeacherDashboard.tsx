@@ -6,6 +6,7 @@ import {
   Award,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   Clock,
   FileText,
   Pencil,
@@ -63,6 +64,17 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
     title: '',
   });
   const [submissionUrl, setSubmissionUrl] = useState('');
+  const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set([1]));
+
+  const toggleWeekExpanded = (week: number) => {
+    const newExpandedWeeks = new Set(expandedWeeks);
+    if (newExpandedWeeks.has(week)) {
+      newExpandedWeeks.delete(week);
+    } else {
+      newExpandedWeeks.add(week);
+    }
+    setExpandedWeeks(newExpandedWeeks);
+  };
 
   useEffect(() => {
     if (!user.uid) {
@@ -287,17 +299,36 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
         {activeTab === 'materials' && (
           <div className="space-y-6">
             {[1, 2, 3, 4].map((week) => (
-              <div key={week} className="space-y-4">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center space-x-2">
-                  <span className="bg-dltt-green text-white w-8 h-8 rounded-full flex items-center justify-center text-sm">
-                    W{week}
-                  </span>
-                  <span>Week {week} Materials</span>
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {materials
-                    .filter((material) => material.week === week)
-                    .map((material) => {
+              <div key={week} className="space-y-3">
+                <button
+                  onClick={() => toggleWeekExpanded(week)}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all"
+                >
+                  <h2 className="text-lg font-bold text-gray-800 flex items-center space-x-3">
+                    <span className="bg-dltt-green text-white w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold">
+                      W{week}
+                    </span>
+                    <span>Week {week} Materials</span>
+                  </h2>
+                  <motion.div
+                    animate={{ rotate: expandedWeeks.has(week) ? 180 : 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <ChevronDown size={20} className="text-gray-600" />
+                  </motion.div>
+                </button>
+
+                {expandedWeeks.has(week) && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+                  >
+                    {materials
+                      .filter((material) => material.week === week)
+                      .map((material) => {
                       const latestSubmission = latestSubmissionByMaterial.get(material.id);
                       const canEditSubmission = material.type === 'assignment' && latestSubmission?.status !== 'graded';
 
@@ -369,10 +400,11 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                         </div>
                       );
                     })}
-                  {materials.filter((material) => material.week === week).length === 0 && (
-                    <p className="text-gray-500 italic text-sm py-4">No materials uploaded for this week yet.</p>
-                  )}
-                </div>
+                    {materials.filter((material) => material.week === week).length === 0 && (
+                      <p className="text-gray-500 italic text-sm py-4">No materials uploaded for this week yet.</p>
+                    )}
+                  </motion.div>
+                )}
               </div>
             ))}
           </div>
