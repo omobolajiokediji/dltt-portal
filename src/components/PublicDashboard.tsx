@@ -14,29 +14,46 @@ function getPiePath(cx: number, cy: number, radius: number, startAngle: number, 
   return `M ${cx} ${cy} L ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
 }
 
-function GenderPieChart({ data }: { data: GenderDistributionItem[] }) {
+function GenderPieChart({
+  data,
+  onSliceHover,
+  onSliceLeave,
+}: {
+  data: GenderDistributionItem[];
+  onSliceHover: (item: GenderDistributionItem) => void;
+  onSliceLeave: () => void;
+}) {
   const total = data.reduce((sum, item) => sum + item.count, 0);
   let currentAngle = -Math.PI / 2;
 
   return (
-    <svg viewBox="0 0 220 220" className="mx-auto block">
-      <circle cx="110" cy="110" r="70" fill="#f3f4f6" />
+    <svg viewBox="0 0 260 260" className="mx-auto block max-w-[280px]">
+      <circle cx="130" cy="130" r="90" fill="#f3f4f6" />
       {data.map((item, index) => {
         const sliceAngle = total > 0 ? (item.count / total) * Math.PI * 2 : 0;
         const startAngle = currentAngle;
         const endAngle = currentAngle + sliceAngle;
-        const path = sliceAngle > 0 ? getPiePath(110, 110, 70, startAngle, endAngle) : '';
+        const path = sliceAngle > 0 ? getPiePath(130, 130, 90, startAngle, endAngle) : '';
         currentAngle = endAngle;
 
         return (
-          <path key={item.label} d={path} fill={item.color} stroke="#ffffff" strokeWidth="2" />
+          <path
+            key={item.label}
+            d={path}
+            fill={item.color}
+            stroke="#ffffff"
+            strokeWidth="2"
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={() => onSliceHover(item)}
+            onMouseLeave={() => onSliceLeave()}
+          />
         );
       })}
-      <circle cx="110" cy="110" r="40" fill="#ffffff" />
-      <text x="110" y="106" textAnchor="middle" fontSize="16" fontWeight="700" fill="#111827">
+      <circle cx="130" cy="130" r="50" fill="#ffffff" />
+      <text x="130" y="126" textAnchor="middle" fontSize="18" fontWeight="700" fill="#111827">
         {total}
       </text>
-      <text x="110" y="126" textAnchor="middle" fontSize="12" fill="#6b7280">
+      <text x="130" y="148" textAnchor="middle" fontSize="12" fill="#6b7280">
         Teachers
       </text>
     </svg>
@@ -48,6 +65,7 @@ export default function PublicDashboard() {
   const [loading, setLoading] = useState(true);
   const [selectedState, setSelectedState] = useState('');
   const [hoveredState, setHoveredState] = useState('');
+  const [hoveredGender, setHoveredGender] = useState<GenderDistributionItem | null>(null);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'stats', 'global'), (doc) => {
@@ -184,23 +202,31 @@ export default function PublicDashboard() {
             </div>
             <Trophy className="text-dltt-green" />
           </div>
-          <div className="flex flex-col items-center gap-4 md:flex-row md:items-start">
-            <div className="flex-1">
-              <GenderPieChart data={stats?.genderDistribution || []} />
+          <div className="flex flex-col items-center gap-6">
+            <div className="relative w-full flex justify-center">
+              <GenderPieChart
+                data={stats?.genderDistribution || []}
+                onSliceHover={(item) => setHoveredGender(item)}
+                onSliceLeave={() => setHoveredGender(null)}
+              />
+              {hoveredGender && (
+                <div className="absolute left-1/2 top-4 -translate-x-1/2 z-10 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-xl text-center text-sm text-gray-700">
+                  <p className="font-semibold text-gray-900">{hoveredGender.label}</p>
+                  <p className="mt-1">{hoveredGender.count} teachers</p>
+                </div>
+              )}
             </div>
-            <div className="flex-1 space-y-3">
+            <div className="w-full grid gap-3">
               {[
                 { label: 'Male', value: maleCount, color: '#2e9107' },
                 { label: 'Female', value: femaleCount, color: '#e9e51b' },
               ].map((item) => (
-                <div key={item.label} className="rounded-2xl bg-gray-50 p-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">{item.label}</p>
-                      <p className="mt-1 text-xl font-bold text-gray-900">{item.value}</p>
-                    </div>
-                    <span className="h-3 w-16 rounded-full" style={{ backgroundColor: item.color }} />
+                <div key={item.label} className="rounded-2xl bg-gray-50 p-4 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">{item.label}</p>
+                    <p className="mt-1 text-xl font-bold text-gray-900">{item.value}</p>
                   </div>
+                  <span className="h-3 w-16 rounded-full" style={{ backgroundColor: item.color }} />
                 </div>
               ))}
             </div>
