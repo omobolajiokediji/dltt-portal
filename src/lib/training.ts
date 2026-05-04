@@ -108,12 +108,18 @@ export function buildTrainingStats(
   });
 
   const enrollment = teachers.length;
+  const activeTeachers = teachers.filter((teacher) => !!teacher.lastLoginAt).length;
   const completionRate =
     teacherProgress.length > 0
       ? Math.round(
           teacherProgress.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / teacherProgress.length,
         )
       : 0;
+
+  const genderDistribution = [
+    { label: 'Male', count: teachers.filter((teacher) => teacher.gender?.toLowerCase() === 'male').length, color: '#2e9107' },
+    { label: 'Female', count: teachers.filter((teacher) => teacher.gender?.toLowerCase() === 'female').length, color: '#ebe725' },
+  ];
 
   const teacherLeaderboard = teacherProgress
     .map(({ teacher, progress }) => ({
@@ -137,11 +143,38 @@ export function buildTrainingStats(
     return { state, score };
   }).sort((a, b) => b.score - a.score || a.state.localeCompare(b.state));
 
+  const teachersByState = STATES.map((state) => {
+    const stateTeachers = teacherProgress.filter((entry) => entry.teacher.state === state);
+    const count = stateTeachers.length;
+    const activeCount = stateTeachers.filter((entry) => !!entry.teacher.lastLoginAt).length;
+    const avgScore = count
+      ? Math.round(stateTeachers.reduce((sum, entry) => sum + entry.progress.totalScore, 0) / count)
+      : 0;
+    const completionRateByState = count
+      ? Math.round(
+          stateTeachers.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / count,
+        )
+      : 0;
+
+    return {
+      state,
+      count,
+      activeCount,
+      avgScore,
+      completionRate: completionRateByState,
+    };
+  })
+    .filter((item) => item.count > 0)
+    .sort((a, b) => b.count - a.count || a.state.localeCompare(b.state));
+
   return {
     enrollment,
     completionRate,
+    activeTeachers,
+    genderDistribution,
     teacherLeaderboard,
     stateLeaderboard,
+    teachersByState,
   };
 }
 

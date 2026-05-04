@@ -305,6 +305,7 @@ export default function SuperAdminDashboard() {
         role: showEditUser.role,
         state: showEditUser.state,
         school: showEditUser.school || '',
+        gender: showEditUser.gender || null,
         attendance: showEditUser.attendance || {},
       });
       setShowEditUser(null);
@@ -919,6 +920,18 @@ export default function SuperAdminDashboard() {
                   value={showEditUser.school || ''}
                   onChange={(e) => setShowEditUser({ ...showEditUser, school: e.target.value })}
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Gender</label>
+                <select
+                  className="input-field"
+                  value={showEditUser.gender || ''}
+                  onChange={(e) => setShowEditUser({ ...showEditUser, gender: e.target.value || undefined })}
+                >
+                  <option value="">Not specified</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
               </div>
               {showEditUser.role === 'teacher' && (
                 <div>

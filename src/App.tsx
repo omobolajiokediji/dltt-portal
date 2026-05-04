@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { AlertCircle, LogOut, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './lib/firebase';
@@ -54,6 +54,11 @@ export default function App() {
         };
 
         await setDoc(userDocRef, defaultSuperAdmin, { merge: true });
+      }
+
+      const userSnapshot = await getDoc(userDocRef);
+      if (userSnapshot.exists()) {
+        await setDoc(userDocRef, { lastLoginAt: new Date().toISOString() }, { merge: true });
       }
 
       unsubscribeUserDoc = onSnapshot(

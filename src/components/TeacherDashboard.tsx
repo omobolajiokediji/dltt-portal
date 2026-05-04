@@ -177,11 +177,17 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
     const formData = new FormData(e.currentTarget);
     const certificateName = String(formData.get('certName') || '').trim();
     const phone = String(formData.get('phone') || '').trim();
+    const gender = String(formData.get('gender') || '').trim() || undefined;
+    const school = String(formData.get('school') || '').trim() || undefined;
+    const state = String(formData.get('state') || '').trim();
 
     try {
       await updateDoc(doc(db, 'users', user.uid), {
         certificateName,
         phone,
+        gender,
+        school,
+        state,
       });
       setNotification({ message: 'Profile updated successfully.', type: 'success' });
     } catch (error) {
@@ -511,6 +517,39 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                   defaultValue={user.phone}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
                   placeholder="080..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Gender</label>
+                <select
+                  name="gender"
+                  defaultValue={user.gender || ''}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                >
+                  <option value="" disabled>Select gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">School/Institution</label>
+                <input
+                  type="text"
+                  name="school"
+                  defaultValue={user.school || ''}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  placeholder="Enter your school name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">State</label>
+                <input
+                  type="text"
+                  name="state"
+                  defaultValue={user.state || ''}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 bg-gray-50 text-gray-500 outline-none"
+                  placeholder="Enter your state"
+                  readOnly
                 />
               </div>
               <div>

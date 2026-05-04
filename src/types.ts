@@ -8,6 +8,8 @@ export interface UserProfile {
   role: UserRole;
   state: string;
   school?: string;
+  gender?: string;
+  lastLoginAt?: string;
   profilePhoto?: string;
   certificateName?: string;
   approvedForCertificate: boolean;
@@ -41,9 +43,26 @@ export interface AssignmentSubmission {
   status: 'pending' | 'graded';
 }
 
+export interface GenderDistributionItem {
+  label: string;
+  count: number;
+  color: string;
+}
+
+export interface TeacherStateStats {
+  state: string;
+  count: number;
+  activeCount: number;
+  avgScore: number;
+  completionRate: number;
+}
+
 export interface TrainingStats {
   enrollment: number;
   completionRate: number;
+  activeTeachers: number;
+  genderDistribution: GenderDistributionItem[];
   stateLeaderboard: { state: string; score: number }[];
+  teachersByState: TeacherStateStats[];
   teacherLeaderboard: { name: string; score: number; state: string }[];
 }

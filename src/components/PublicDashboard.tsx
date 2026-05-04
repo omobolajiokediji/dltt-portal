@@ -1,13 +1,53 @@
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, limit, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { TrainingStats } from '../types';
+import { GenderDistributionItem, TrainingStats } from '../types';
 import { Users, GraduationCap, Map, Trophy } from 'lucide-react';
 import { motion } from 'motion/react';
+
+function getPiePath(cx: number, cy: number, radius: number, startAngle: number, endAngle: number) {
+  const startX = cx + radius * Math.cos(startAngle);
+  const startY = cy + radius * Math.sin(startAngle);
+  const endX = cx + radius * Math.cos(endAngle);
+  const endY = cy + radius * Math.sin(endAngle);
+  const largeArcFlag = endAngle - startAngle <= Math.PI ? 0 : 1;
+  return `M ${cx} ${cy} L ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
+}
+
+function GenderPieChart({ data }: { data: GenderDistributionItem[] }) {
+  const total = data.reduce((sum, item) => sum + item.count, 0);
+  let currentAngle = -Math.PI / 2;
+
+  return (
+    <svg viewBox="0 0 220 220" className="mx-auto block">
+      <circle cx="110" cy="110" r="70" fill="#f3f4f6" />
+      {data.map((item, index) => {
+        const sliceAngle = total > 0 ? (item.count / total) * Math.PI * 2 : 0;
+        const startAngle = currentAngle;
+        const endAngle = currentAngle + sliceAngle;
+        const path = sliceAngle > 0 ? getPiePath(110, 110, 70, startAngle, endAngle) : '';
+        currentAngle = endAngle;
+
+        return (
+          <path key={item.label} d={path} fill={item.color} stroke="#ffffff" strokeWidth="2" />
+        );
+      })}
+      <circle cx="110" cy="110" r="40" fill="#ffffff" />
+      <text x="110" y="106" textAnchor="middle" fontSize="16" fontWeight="700" fill="#111827">
+        {total}
+      </text>
+      <text x="110" y="126" textAnchor="middle" fontSize="12" fill="#6b7280">
+        Teachers
+      </text>
+    </svg>
+  );
+}
 
 export default function PublicDashboard() {
   const [stats, setStats] = useState<TrainingStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedState, setSelectedState] = useState('');
+  const [hoveredState, setHoveredState] = useState('');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'stats', 'global'), (doc) => {
@@ -20,6 +60,12 @@ export default function PublicDashboard() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (stats?.teachersByState?.length) {
+      setSelectedState((current) => current || stats.teachersByState[0].state);
+    }
+  }, [stats]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-20">
@@ -28,11 +74,15 @@ export default function PublicDashboard() {
     );
   }
 
+  const maleCount = stats?.genderDistribution?.find((item) => item.label === 'Male')?.count || 0;
+  const femaleCount = stats?.genderDistribution?.find((item) => item.label === 'Female')?.count || 0;
+  const maxStateCount = Math.max(1, ...(stats?.teachersByState?.map((item) => item.count) || [1]));
+
   const cards = [
-    { title: 'Total Enrollment', value: stats?.enrollment || 0, icon: Users, color: 'bg-blue-50 text-blue-600' },
+    { title: 'Total Teachers', value: stats?.enrollment || 0, icon: Users, color: 'bg-blue-50 text-blue-600' },
+    { title: 'Active Teachers', value: stats?.activeTeachers || 0, icon: Trophy, color: 'bg-yellow-50 text-yellow-600' },
+    { title: 'States Covered', value: stats?.teachersByState?.length || 0, icon: Map, color: 'bg-purple-50 text-purple-600' },
     { title: 'Completion Rate', value: `${stats?.completionRate || 0}%`, icon: GraduationCap, color: 'bg-green-50 text-green-600' },
-    { title: 'States Covered', value: '6', icon: Map, color: 'bg-purple-50 text-purple-600' },
-    { title: 'Active Teachers', value: stats?.teacherLeaderboard?.length || 0, icon: Trophy, color: 'bg-yellow-50 text-yellow-600' },
   ];
 
   return (
@@ -61,6 +111,101 @@ export default function PublicDashboard() {
             <p className="text-2xl font-bold text-gray-900 mt-1">{card.value}</p>
           </motion.div>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100"
+        >
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Teacher Distribution by State</h2>
+              <p className="text-sm text-gray-500">Compare state-level teacher coverage and activity.</p>
+            </div>
+            <Map className="text-dltt-green" />
+          </div>
+          <div className="space-y-4">
+            {stats?.teachersByState?.map((state) => (
+              <button
+                key={state.state}
+                type="button"
+                onClick={() => setSelectedState(state.state)}
+                onMouseEnter={() => setHoveredState(state.state)}
+                onMouseLeave={() => setHoveredState('')}
+                className={`relative w-full rounded-2xl border px-4 py-4 text-left transition-colors ${
+                  selectedState === state.state ? 'border-dltt-green bg-green-50' : 'border-gray-200 bg-white hover:bg-gray-50'
+                }`}
+              >
+                {hoveredState === state.state && (
+                  <div className="absolute left-4 right-4 -top-24 z-20 rounded-2xl border border-gray-200 bg-white p-4 shadow-xl text-sm text-gray-700">
+                    <div className="font-semibold text-gray-900 mb-2">{state.state} details</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Active</p>
+                        <p className="font-semibold text-gray-900">{state.activeCount}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Completion</p>
+                        <p className="font-semibold text-gray-900">{state.completionRate}%</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Avg Score</p>
+                        <p className="font-semibold text-gray-900">{state.avgScore}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-3 text-sm font-semibold text-gray-900">
+                  <span>{state.state}</span>
+                  <span>{state.count} teachers</span>
+                </div>
+                <div className="mt-3 h-3 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-dltt-green via-lime-400 to-yellow-400 transition-all duration-500"
+                    style={{ width: `${Math.max(10, (state.count / maxStateCount) * 100)}%` }}
+                  />
+                </div>
+              </button>
+            ))}
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"
+        >
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Teacher Gender Share</h2>
+              <p className="text-sm text-gray-500">Live gender distribution across teacher accounts.</p>
+            </div>
+            <Trophy className="text-dltt-green" />
+          </div>
+          <div className="flex flex-col items-center gap-4 md:flex-row md:items-start">
+            <div className="flex-1">
+              <GenderPieChart data={stats?.genderDistribution || []} />
+            </div>
+            <div className="flex-1 space-y-3">
+              {[
+                { label: 'Male', value: maleCount, color: '#2e9107' },
+                { label: 'Female', value: femaleCount, color: '#e9e51b' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl bg-gray-50 p-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">{item.label}</p>
+                      <p className="mt-1 text-xl font-bold text-gray-900">{item.value}</p>
+                    </div>
+                    <span className="h-3 w-16 rounded-full" style={{ backgroundColor: item.color }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
