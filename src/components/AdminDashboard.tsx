@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { CheckCircle, Edit, FileSpreadsheet, FileText, MapPin, Plus, Search, Trash2, Users, XCircle } from 'lucide-react';
+import { AudioWaveform, BookOpen, CheckCircle, Edit, FileSpreadsheet, FileText, MapPin, Plus, Search, Trash2, Users, Video, XCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { secondaryAuth, db } from '../lib/firebase';
@@ -498,7 +498,15 @@ export default function AdminDashboard() {
                         material.type === 'assignment' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
                       }`}
                     >
-                      <FileText size={24} />
+                      {material.type === 'assignment' ? (
+                        <FileText size={24} />
+                      ) : material.type === 'video' ? (
+                        <Video size={24} />
+                      ) : material.type === 'audio' ? (
+                        <AudioWaveform size={24} />
+                      ) : (
+                        <BookOpen size={24} />
+                      )}
                     </div>
                     <div>
                       <h3 className="font-bold text-gray-900">{material.title}</h3>
@@ -683,6 +691,8 @@ export default function AdminDashboard() {
                     <option value="slide">Slide</option>
                     <option value="pdf">PDF</option>
                     <option value="assignment">Assignment</option>
+                    <option value="video">Video</option>
+                    <option value="audio">Audio</option>
                   </select>
                 </div>
                 <div>

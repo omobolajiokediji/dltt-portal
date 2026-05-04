@@ -28,7 +28,7 @@ service cloud.firestore {
     //   - id: string (required)
     //   - title: string (required)
     //   - description: string (optional)
-    //   - type: string (required, enum: slide, pdf, assignment)
+    //   - type: string (required, enum: slide, pdf, assignment, video, audio)
     //   - contentUrl: string (required)
     //   - assignedTo: list (required)
     //   - assignedStates: list (required)
@@ -104,7 +104,7 @@ service cloud.firestore {
     function isValidMaterial(data) {
       return data.keys().hasAll(['id', 'title', 'type', 'contentUrl', 'week']) &&
              data.title is string && data.title.size() < 200 &&
-             data.type in ['slide', 'pdf', 'assignment'] &&
+             data.type in ['slide', 'pdf', 'assignment', 'video', 'audio'] &&
              data.contentUrl is string &&
              data.week is number;
     }

@@ -29,7 +29,7 @@
         "id": { "type": "string" },
         "title": { "type": "string" },
         "description": { "type": "string" },
-        "type": { "type": "string", "enum": ["slide", "pdf", "assignment"] },
+        "type": { "type": "string", "enum": ["slide", "pdf", "assignment", "video", "audio"] },
         "contentUrl": { "type": "string" },
         "assignedTo": { "type": "array" },
         "assignedStates": { "type": "array" },

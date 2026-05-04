@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import {
   AlertCircle,
+  AudioWaveform,
   Award,
   BookOpen,
   CheckCircle2,
@@ -10,6 +11,7 @@ import {
   Pencil,
   Trophy,
   Users,
+  Video,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db } from '../lib/firebase';
@@ -310,7 +312,15 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                                 material.type === 'assignment' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
                               }`}
                             >
-                              {material.type === 'assignment' ? <FileText size={20} /> : <BookOpen size={20} />}
+                              {material.type === 'assignment' ? (
+                                <FileText size={20} />
+                              ) : material.type === 'video' ? (
+                                <Video size={20} />
+                              ) : material.type === 'audio' ? (
+                                <AudioWaveform size={20} />
+                              ) : (
+                                <BookOpen size={20} />
+                              )}
                             </div>
                             {material.type === 'assignment' && material.dueDate && (
                               <span className="text-xs font-medium px-2 py-1 bg-yellow-50 text-yellow-700 rounded-full">

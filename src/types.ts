@@ -23,7 +23,7 @@ export interface LearningMaterial {
   firestoreId?: string;
   title: string;
   description: string;
-  type: 'slide' | 'pdf' | 'assignment';
+  type: 'slide' | 'pdf' | 'assignment' | 'video' | 'audio';
   contentUrl: string;
   assignedTo: string[]; // List of user IDs or 'all'
   assignedStates: string[]; // List of states or 'all'

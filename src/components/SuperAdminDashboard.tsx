@@ -3,6 +3,8 @@ import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import {
   AlertTriangle,
+  AudioWaveform,
+  BookOpen,
   CheckCircle,
   Edit,
   FileSpreadsheet,
@@ -16,6 +18,7 @@ import {
   Trash2,
   UserPlus,
   Users,
+  Video,
   XCircle,
 } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -658,7 +661,15 @@ export default function SuperAdminDashboard() {
                         material.type === 'assignment' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
                       }`}
                     >
-                      <FileText size={24} />
+                      {material.type === 'assignment' ? (
+                        <FileText size={24} />
+                      ) : material.type === 'video' ? (
+                        <Video size={24} />
+                      ) : material.type === 'audio' ? (
+                        <AudioWaveform size={24} />
+                      ) : (
+                        <BookOpen size={24} />
+                      )}
                     </div>
                     <div>
                       <h3 className="font-bold text-gray-900">{material.title}</h3>
@@ -1028,6 +1039,8 @@ export default function SuperAdminDashboard() {
                     <option value="slide">Slide</option>
                     <option value="pdf">PDF</option>
                     <option value="assignment">Assignment</option>
+                    <option value="video">Video</option>
+                    <option value="audio">Audio</option>
                   </select>
                 </div>
                 <div>
