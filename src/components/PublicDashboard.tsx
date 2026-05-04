@@ -175,12 +175,12 @@ export default function PublicDashboard() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100"
+          className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-full"
         >
           <div className="flex items-center justify-between mb-5">
             <div>
               <h2 className="text-xl font-bold text-gray-900">Teacher Gender Share</h2>
-              <p className="text-sm text-gray-500">Live gender distribution across teacher accounts.</p>
+              <p className="text-sm text-gray-500">Live teacher distribution by gender.</p>
             </div>
             <Trophy className="text-dltt-green" />
           </div>
