@@ -94,6 +94,7 @@ export default function PublicDashboard() {
 
   const maleCount = stats?.genderDistribution?.find((item) => item.label === 'Male')?.count || 0;
   const femaleCount = stats?.genderDistribution?.find((item) => item.label === 'Female')?.count || 0;
+  const genderTotal = stats?.genderDistribution?.reduce((sum, item) => sum + item.count, 0) || 0;
   const maxStateCount = Math.max(1, ...(stats?.teachersByState?.map((item) => item.count) || [1]));
 
   const cards = [
@@ -212,7 +213,10 @@ export default function PublicDashboard() {
               {hoveredGender && (
                 <div className="absolute left-1/2 top-4 -translate-x-1/2 z-10 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-xl text-center text-sm text-gray-700">
                   <p className="font-semibold text-gray-900">{hoveredGender.label}</p>
-                  <p className="mt-1">{hoveredGender.count} teachers</p>
+                  <p className="mt-1">
+                    {hoveredGender.count} teachers
+                    {genderTotal > 0 ? ` · ${Math.round((hoveredGender.count / genderTotal) * 100)}%` : ''}
+                  </p>
                 </div>
               )}
             </div>

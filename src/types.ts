@@ -16,6 +16,9 @@ export interface UserProfile {
   totalScore: number;
   attendance: Record<string, boolean>; // e.g., { 'week1': true }
   assignmentCompletion: Record<string, boolean>; // e.g., { 'materialId': true }
+  accountNumber?: string;
+  bank?: string;
+  accountName?: string;
 }
 
 export interface LearningMaterial {

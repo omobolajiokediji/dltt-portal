@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import {
   AlertTriangle,
@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
-import { auth, secondaryAuth, db } from '../lib/firebase';
+import { secondaryAuth, db } from '../lib/firebase';
 import { STATES, WEEKS } from '../constants';
 import { AssignmentSubmission, LearningMaterial, UserProfile, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
@@ -294,6 +294,25 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const handleDownloadTeachers = () => {
+    const teachers = users.filter((user) => user.role === 'teacher');
+    const data = teachers.map((teacher) => ({
+      'Full Name': teacher.name,
+      State: teacher.state,
+      Gender: teacher.gender || '',
+      Email: teacher.email,
+      'Phone Number': teacher.phone,
+      'Account Number': teacher.accountNumber || '',
+      'Account Name': teacher.accountName || '',
+      'Bank Name': teacher.bank || '',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Teachers');
+    XLSX.writeFile(workbook, 'teachers-data.xlsx');
+  };
+
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!showEditUser) {
@@ -310,6 +329,9 @@ export default function SuperAdminDashboard() {
         school: showEditUser.school || '',
         gender: showEditUser.gender || null,
         attendance: showEditUser.attendance || {},
+        accountNumber: showEditUser.accountNumber || '',
+        bank: showEditUser.bank || '',
+        accountName: showEditUser.accountName || '',
       });
       setShowEditUser(null);
       setNotification({ message: 'User updated successfully.', type: 'success' });
@@ -601,15 +623,24 @@ export default function SuperAdminDashboard() {
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-8">
             <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/30">
               <h2 className="text-xl font-bold text-gray-900">User Management</h2>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                <input
-                  type="text"
-                  placeholder="Search by name, email or phone..."
-                  className="pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm w-full sm:w-80 focus:ring-2 focus:ring-dltt-green/20 focus:border-dltt-green outline-none transition-all"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleDownloadTeachers}
+                  className="flex items-center space-x-2 px-4 py-2 bg-dltt-green text-white rounded-xl font-bold hover:opacity-90 transition-opacity"
+                >
+                  <FileSpreadsheet size={18} />
+                  <span>Download Teachers</span>
+                </button>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                  <input
+                    type="text"
+                    placeholder="Search by name, email or phone..."
+                    className="pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm w-full sm:w-80 focus:ring-2 focus:ring-dltt-green/20 focus:border-dltt-green outline-none transition-all"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
             <DataTable
@@ -943,6 +974,33 @@ export default function SuperAdminDashboard() {
                   <option value="male">Male</option>
                   <option value="female">Female</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Account Number</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  value={showEditUser.accountNumber || ''}
+                  onChange={(e) => setShowEditUser({ ...showEditUser, accountNumber: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Bank Name</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  value={showEditUser.bank || ''}
+                  onChange={(e) => setShowEditUser({ ...showEditUser, bank: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Account Name</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  value={showEditUser.accountName || ''}
+                  onChange={(e) => setShowEditUser({ ...showEditUser, accountName: e.target.value })}
+                />
               </div>
               {showEditUser.role === 'teacher' && (
                 <div>

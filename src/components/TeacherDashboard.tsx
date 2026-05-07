@@ -106,8 +106,8 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
       submissionsQuery,
       (snapshot) => {
         const teacherSubmissions = snapshot.docs
-          .map((submissionDoc) => ({ id: submissionDoc.id, ...submissionDoc.data() }))
-          .sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt)) as AssignmentSubmission[];
+          .map((submissionDoc) => ({ id: submissionDoc.id, ...submissionDoc.data() }) as AssignmentSubmission)
+          .sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt));
 
         setSubmissions(teacherSubmissions);
       },
@@ -194,6 +194,9 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
     const gender = String(formData.get('gender') || '').trim() || undefined;
     const school = String(formData.get('school') || '').trim() || undefined;
     const state = String(formData.get('state') || '').trim();
+    const accountNumber = String(formData.get('accountNumber') || '').trim() || undefined;
+    const bank = String(formData.get('bank') || '').trim() || undefined;
+    const accountName = String(formData.get('accountName') || '').trim() || undefined;
 
     try {
       await updateDoc(doc(db, 'users', user.uid), {
@@ -202,6 +205,9 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
         gender,
         school,
         state,
+        accountNumber,
+        bank,
+        accountName,
       });
       setNotification({ message: 'Profile updated successfully.', type: 'success' });
     } catch (error) {
@@ -593,6 +599,36 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 bg-gray-50 text-gray-500 outline-none"
                   placeholder="Enter your state"
                   readOnly
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Account Number</label>
+                <input
+                  type="text"
+                  name="accountNumber"
+                  defaultValue={user.accountNumber || ''}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  placeholder="Enter your account number"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Bank Name</label>
+                <input
+                  type="text"
+                  name="bank"
+                  defaultValue={user.bank || ''}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  placeholder="Enter your bank name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Account Name</label>
+                <input
+                  type="text"
+                  name="accountName"
+                  defaultValue={user.accountName || ''}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  placeholder="Enter your account name"
                 />
               </div>
               <div>
