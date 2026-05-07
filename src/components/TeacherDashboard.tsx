@@ -198,6 +198,20 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
     const bank = String(formData.get('bank') || '').trim() || undefined;
     const accountName = String(formData.get('accountName') || '').trim() || undefined;
 
+    if (
+      !certificateName ||
+      !phone ||
+      !gender ||
+      !school ||
+      !state ||
+      !accountNumber ||
+      !bank ||
+      !accountName
+    ) {
+      setNotification({ message: 'Please complete all profile fields before saving.', type: 'error' });
+      return;
+    }
+
     try {
       await updateDoc(doc(db, 'users', user.uid), {
         certificateName,
@@ -550,6 +564,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Full Name (for Certificate)</label>
                 <input
+                  required
                   type="text"
                   name="certName"
                   defaultValue={user.certificateName || user.name}
@@ -560,6 +575,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Phone Number</label>
                 <input
+                  required
                   type="tel"
                   name="phone"
                   readOnly
@@ -571,6 +587,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Gender</label>
                 <select
+                  required
                   name="gender"
                   defaultValue={user.gender || ''}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
@@ -583,6 +600,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">School/Institution</label>
                 <input
+                  required
                   type="text"
                   name="school"
                   defaultValue={user.school || ''}
@@ -593,6 +611,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">State</label>
                 <input
+                  required
                   type="text"
                   name="state"
                   defaultValue={user.state || ''}
@@ -604,6 +623,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Account Number</label>
                 <input
+                  required
                   type="text"
                   name="accountNumber"
                   defaultValue={user.accountNumber || ''}
@@ -614,6 +634,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Bank Name</label>
                 <input
+                  required
                   type="text"
                   name="bank"
                   defaultValue={user.bank || ''}
@@ -624,6 +645,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Account Name</label>
                 <input
+                  required
                   type="text"
                   name="accountName"
                   defaultValue={user.accountName || ''}
