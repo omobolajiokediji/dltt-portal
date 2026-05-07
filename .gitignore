@@ -9,4 +9,3 @@ coverage/
 
 functions/node_modules/
 functions/service-account-key.json
-functions/service-account-key.json.json
