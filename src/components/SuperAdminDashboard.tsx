@@ -812,7 +812,17 @@ export default function SuperAdminDashboard() {
             animate={{ scale: 1, opacity: 1 }}
             className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl"
           >
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Create New User</h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Create New User</h2>
+              <button
+                type="button"
+                aria-label="Close create user form"
+                onClick={() => setShowAddUser(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
             <form onSubmit={handleCreateUser} className="space-y-4">
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">Full Name</label>
@@ -894,7 +904,17 @@ export default function SuperAdminDashboard() {
             animate={{ scale: 1, opacity: 1 }}
             className="bg-white rounded-2xl p-8 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto"
           >
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Edit User</h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Edit User</h2>
+              <button
+                type="button"
+                aria-label="Close edit user form"
+                onClick={() => setShowEditUser(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
             <form onSubmit={handleUpdateUser} className="space-y-4">
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">Full Name</label>
@@ -1063,7 +1083,12 @@ export default function SuperAdminDashboard() {
           >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-gray-900">Add Learning Material</h2>
-              <button onClick={() => setShowAddMaterial(false)} className="text-gray-400 hover:text-gray-600">
+              <button
+                type="button"
+                aria-label="Close add material form"
+                onClick={() => setShowAddMaterial(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
                 <XCircle size={24} />
               </button>
             </div>
