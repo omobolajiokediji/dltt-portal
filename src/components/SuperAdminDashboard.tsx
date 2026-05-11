@@ -23,10 +23,16 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
-import { secondaryAuth, db } from '../lib/firebase';
+import { auth, secondaryAuth, db } from '../lib/firebase';
 import { STATES, WEEKS } from '../constants';
-import { AssignmentSubmission, LearningMaterial, UserProfile, UserRole } from '../types';
+import { AssignmentSubmission, LearningMaterial, PortalSettings, UserProfile, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
+import {
+  getTeacherProfileEditingDisabled,
+  describePortalSettingsStorage,
+  saveTeacherProfileEditingDisabled,
+  subscribeToPortalSettings,
+} from '../lib/portalSettings';
 import { getTeacherProgress, syncTrainingDerivedData } from '../lib/training';
 import ConfirmDialog from './ConfirmDialog';
 import DataTable, { DataTableColumn } from './DataTable';
@@ -60,6 +66,7 @@ export default function SuperAdminDashboard() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [materials, setMaterials] = useState<LearningMaterial[]>([]);
   const [submissions, setSubmissions] = useState<AssignmentSubmission[]>([]);
+  const [portalSettings, setPortalSettings] = useState<PortalSettings>({ teacherProfileEditingDisabled: false });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'materials' | 'grading'>('users');
@@ -111,10 +118,23 @@ export default function SuperAdminDashboard() {
       (error) => handleFirestoreError(error, OperationType.LIST, 'submissions'),
     );
 
+    const unsubPortalStats = subscribeToPortalSettings(
+      db,
+      setPortalSettings,
+      (error) => {
+        console.error('Failed to read portal settings:', error);
+        setNotification({
+          message: 'Could not read portal settings. Please deploy the latest Firestore rules.',
+          type: 'error',
+        });
+      },
+    );
+
     return () => {
       unsubUsers();
       unsubMaterials();
       unsubSubmissions();
+      unsubPortalStats();
     };
   }, []);
 
@@ -151,6 +171,7 @@ export default function SuperAdminDashboard() {
 
   const teacherCount = users.filter((user) => user.role === 'teacher').length;
   const adminCount = users.filter((user) => user.role === 'admin').length;
+  const isTeacherProfileEditingDisabled = getTeacherProfileEditingDisabled(portalSettings);
 
   const userColumns: DataTableColumn<UserProfile>[] = [
     {
@@ -337,6 +358,26 @@ export default function SuperAdminDashboard() {
       setNotification({ message: 'User updated successfully.', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'users');
+    }
+  };
+
+  const handleTeacherProfileEditingToggle = async (disabled: boolean) => {
+    const previousSettings = portalSettings;
+    setPortalSettings({ teacherProfileEditingDisabled: disabled });
+
+    try {
+      await saveTeacherProfileEditingDisabled(db, auth, disabled);
+      setNotification({
+        message: disabled ? 'Teacher profile editing has been disabled.' : 'Teacher profile editing has been enabled.',
+        type: 'success',
+      });
+    } catch (error) {
+      setPortalSettings(previousSettings);
+      console.error('Failed to update teacher profile editing setting:', error);
+      setNotification({
+        message: 'Could not update teacher profile editing. Please check your Firebase permissions and try again.',
+        type: 'error',
+      });
     }
   };
 
@@ -650,6 +691,30 @@ export default function SuperAdminDashboard() {
               emptyMessage="No users match your current search."
               initialPageSize={10}
             />
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-8">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Teacher Profile Editing</h2>
+                <p className="text-sm text-gray-600">
+                  Disable the teacher profile form, including account information fields, until it is enabled again.
+                </p>
+                <p className="mt-1 text-xs font-mono text-gray-400">Stored in {describePortalSettingsStorage()}</p>
+              </div>
+              <label className="inline-flex items-center gap-3 cursor-pointer">
+                <span className="text-sm font-bold text-gray-700">
+                  {isTeacherProfileEditingDisabled ? 'Disabled' : 'Enabled'}
+                </span>
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={isTeacherProfileEditingDisabled}
+                  onChange={(e) => handleTeacherProfileEditingToggle(e.target.checked)}
+                />
+                <span className="relative h-7 w-12 rounded-full bg-gray-200 transition-colors peer-checked:bg-red-500 after:absolute after:left-1 after:top-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:after:translate-x-5"></span>
+              </label>
+            </div>
           </div>
 
           <div className="bg-red-50 rounded-2xl p-8 border border-red-100">

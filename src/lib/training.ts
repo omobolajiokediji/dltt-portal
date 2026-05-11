@@ -214,6 +214,6 @@ export async function syncTrainingDerivedData(
     }
   }
 
-  batch.set(doc(db, 'stats', 'global'), buildTrainingStats(users, materials, submissions));
+  batch.set(doc(db, 'stats', 'global'), buildTrainingStats(users, materials, submissions), { merge: true });
   await batch.commit();
 }

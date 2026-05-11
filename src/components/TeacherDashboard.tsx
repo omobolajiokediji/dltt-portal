@@ -16,8 +16,9 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db } from '../lib/firebase';
-import { AssignmentSubmission, LearningMaterial, UserProfile } from '../types';
+import { AssignmentSubmission, LearningMaterial, PortalSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
+import { getTeacherProfileEditingDisabled, subscribeToPortalSettings } from '../lib/portalSettings';
 import { getTeacherProgress, isMaterialAssignedToUser } from '../lib/training';
 import Modal from './Modal';
 import Notification, { NotificationType } from './Notification';
@@ -55,6 +56,7 @@ function buildCertificateMarkup(user: UserProfile) {
 export default function TeacherDashboard({ user }: { user: UserProfile }) {
   const [materials, setMaterials] = useState<LearningMaterial[]>([]);
   const [submissions, setSubmissions] = useState<AssignmentSubmission[]>([]);
+  const [portalSettings, setPortalSettings] = useState<PortalSettings>({ teacherProfileEditingDisabled: false });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'materials' | 'assignments' | 'certificate' | 'profile'>('materials');
   const [notification, setNotification] = useState<{ message: string; type: NotificationType } | null>(null);
@@ -114,9 +116,18 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
       (error) => handleFirestoreError(error, OperationType.LIST, 'submissions'),
     );
 
+    const unsubPortalStats = subscribeToPortalSettings(
+      db,
+      setPortalSettings,
+      (error) => {
+        console.error('Failed to read portal settings:', error);
+      },
+    );
+
     return () => {
       unsubMaterials();
       unsubSubmissions();
+      unsubPortalStats();
     };
   }, [user]);
 
@@ -139,6 +150,10 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
   }, [submissions]);
 
   const progress = useMemo(() => getTeacherProgress(user, materials, submissions), [materials, submissions, user]);
+  const isProfileEditingDisabled = getTeacherProfileEditingDisabled(portalSettings);
+  const editableProfileFieldClass = `w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none ${
+    isProfileEditingDisabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''
+  }`;
   const certificateReadyHint =
     progress.totalAssignments > 0 &&
     progress.submittedAssignments === progress.totalAssignments &&
@@ -188,6 +203,11 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
 
   const handleProfileUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (isProfileEditingDisabled) {
+      setNotification({ message: 'Profile editing is currently disabled by the super admin.', type: 'error' });
+      return;
+    }
+
     const formData = new FormData(e.currentTarget);
     const certificateName = String(formData.get('certName') || '').trim();
     const phone = String(formData.get('phone') || '').trim();
@@ -560,19 +580,25 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
         {activeTab === 'profile' && (
           <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 max-w-2xl mx-auto w-full">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Your Profile</h2>
+            {isProfileEditingDisabled && (
+              <div className="mb-6 rounded-xl border border-yellow-100 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-800">
+                Profile editing is currently disabled by the super admin.
+              </div>
+            )}
             <form className="space-y-6" onSubmit={handleProfileUpdate}>
-              <div>
+              <fieldset disabled={isProfileEditingDisabled} className="space-y-6 disabled:opacity-75">
+                <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Full Name (for Certificate)</label>
                 <input
                   required
                   type="text"
                   name="certName"
                   defaultValue={user.certificateName || user.name}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  className={editableProfileFieldClass}
                   placeholder="Enter your name exactly as it should appear"
                 />
-              </div>
-              <div>
+                </div>
+                <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Phone Number</label>
                 <input
                   required
@@ -583,32 +609,32 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
                   placeholder="080..."
                 />
-              </div>
-              <div>
+                </div>
+                <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Gender</label>
                 <select
                   required
                   name="gender"
                   defaultValue={user.gender || ''}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  className={editableProfileFieldClass}
                 >
                   <option value="" disabled>Select gender</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
                 </select>
-              </div>
-              <div>
+                </div>
+                <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">School/Institution</label>
                 <input
                   required
                   type="text"
                   name="school"
                   defaultValue={user.school || ''}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  className={editableProfileFieldClass}
                   placeholder="Enter your school name"
                 />
-              </div>
-              <div>
+                </div>
+                <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">State</label>
                 <input
                   required
@@ -619,41 +645,41 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                   placeholder="Enter your state"
                   readOnly
                 />
-              </div>
-              <div>
+                </div>
+                <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Account Number</label>
                 <input
                   required
                   type="text"
                   name="accountNumber"
                   defaultValue={user.accountNumber || ''}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  className={editableProfileFieldClass}
                   placeholder="Enter your account number"
                 />
-              </div>
-              <div>
+                </div>
+                <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Bank Name</label>
                 <input
                   required
                   type="text"
                   name="bank"
                   defaultValue={user.bank || ''}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  className={editableProfileFieldClass}
                   placeholder="Enter your bank name"
                 />
-              </div>
-              <div>
+                </div>
+                <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Account Name</label>
                 <input
                   required
                   type="text"
                   name="accountName"
                   defaultValue={user.accountName || ''}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none"
+                  className={editableProfileFieldClass}
                   placeholder="Enter your account name"
                 />
-              </div>
-              <div>
+                </div>
+                <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Attendance Overview</label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[1, 2, 3, 4].map((week) => {
@@ -672,13 +698,15 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                     );
                   })}
                 </div>
-              </div>
+                </div>
+              </fieldset>
               <div className="pt-4">
                 <button
                   type="submit"
-                  className="w-full bg-dltt-green text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity"
+                  disabled={isProfileEditingDisabled}
+                  className="w-full bg-dltt-green text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
                 >
-                  Save Profile Changes
+                  {isProfileEditingDisabled ? 'Profile Editing Disabled' : 'Save Profile Changes'}
                 </button>
               </div>
             </form>

@@ -19,6 +19,11 @@ export interface UserProfile {
   accountNumber?: string;
   bank?: string;
   accountName?: string;
+  teacherProfileEditingDisabled?: boolean;
+}
+
+export interface PortalSettings {
+  teacherProfileEditingDisabled?: boolean;
 }
 
 export interface LearningMaterial {

@@ -129,6 +129,11 @@ service cloud.firestore {
              request.resource.data.id == resource.data.id;
     }
 
+    function teacherProfileEditingDisabled() {
+      return exists(/databases/$(database)/documents/settings/portal) &&
+             get(/databases/$(database)/documents/settings/portal).data.teacherProfileEditingDisabled == true;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -136,8 +141,17 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if (isAdmin() || isSuperAdmin()) && isValidUser(request.resource.data);
-      allow update: if (isAdmin() || isSuperAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role)) && isValidUserUpdate();
+      allow update: if (
+        isAdmin() ||
+        isSuperAdmin() ||
+        (isOwner(userId) && request.resource.data.role == resource.data.role && !teacherProfileEditingDisabled())
+      ) && isValidUserUpdate();
       allow delete: if isSuperAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
     }
 
     match /materials/{materialId} {
