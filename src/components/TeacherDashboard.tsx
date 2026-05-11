@@ -119,9 +119,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
     const unsubPortalStats = subscribeToPortalSettings(
       db,
       setPortalSettings,
-      (error) => {
-        console.error('Failed to read portal settings:', error);
-      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'portal settings'),
     );
 
     return () => {
@@ -204,7 +202,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
   const handleProfileUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (isProfileEditingDisabled) {
-      setNotification({ message: 'Profile editing is currently disabled by the super admin.', type: 'error' });
+      setNotification({ message: 'Profile editing is currently disabled. Contact Admin.', type: 'error' });
       return;
     }
 
@@ -582,7 +580,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Your Profile</h2>
             {isProfileEditingDisabled && (
               <div className="mb-6 rounded-xl border border-yellow-100 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-800">
-                Profile editing is currently disabled by the super admin.
+                Profile editing is currently disabled. Contact Admin.
               </div>
             )}
             <form className="space-y-6" onSubmit={handleProfileUpdate}>
