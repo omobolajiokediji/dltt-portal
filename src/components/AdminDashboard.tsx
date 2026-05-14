@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { AudioWaveform, BookOpen, CheckCircle, Edit, FileSpreadsheet, FileText, MapPin, Plus, Search, Trash2, Users, Video, XCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { secondaryAuth, db } from '../lib/firebase';
 import { STATES, WEEKS } from '../constants';
-import { AssignmentSubmission, LearningMaterial, UserProfile, UserRole } from '../types';
+import { AssignmentSubmission, ImportedScoreRow, LearningMaterial, UserProfile, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
 import { getTeacherProgress, syncTrainingDerivedData } from '../lib/training';
+import { parseAssessmentImportFile } from '../lib/submissionImport';
 import ConfirmDialog from './ConfirmDialog';
 import DataTable, { DataTableColumn } from './DataTable';
 import Notification, { NotificationType } from './Notification';
@@ -19,6 +20,18 @@ type MaterialFormState = Partial<LearningMaterial> & {
 };
 
 type GradeDraftState = Record<string, { score: string; feedback: string }>;
+
+type ImportPreviewStatus = 'ready' | 'missingTeacher' | 'invalidScore' | 'invalidWeek';
+
+type ImportPreviewRow = ImportedScoreRow & {
+  rowNumber: number;
+  teacherName?: string;
+  teacherId?: string;
+  materialTitle?: string;
+  materialId?: string;
+  status: ImportPreviewStatus;
+  reason?: string;
+};
 
 const defaultMaterialState: MaterialFormState = {
   type: 'slide',
@@ -39,6 +52,9 @@ export default function AdminDashboard() {
   const [showEditProfile, setShowEditProfile] = useState<UserProfile | null>(null);
   const [newMaterial, setNewMaterial] = useState<MaterialFormState>(defaultMaterialState);
   const [gradeDrafts, setGradeDrafts] = useState<GradeDraftState>({});
+  const [gradeImporting, setGradeImporting] = useState(false);
+  const [importPreviewRows, setImportPreviewRows] = useState<ImportPreviewRow[]>([]);
+  const [importPreviewFileName, setImportPreviewFileName] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -50,6 +66,12 @@ export default function AdminDashboard() {
     title: '',
     message: '',
     onConfirm: () => {},
+  });
+  const [manualGradeForm, setManualGradeForm] = useState({
+    state: '',
+    teacherId: '',
+    week: '',
+    score: '',
   });
 
   useEffect(() => {
@@ -155,7 +177,9 @@ export default function AdminDashboard() {
         return (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-gray-400">
-              <span>{progress.submittedAssignments}/{progress.totalAssignments} submitted</span>
+              <span>
+                {progress.submittedAssignments}/{progress.totalAssignments} assignments · {progress.completedWeeklyTests}/{progress.totalWeeklyTests} tests
+              </span>
               <span>{progress.totalScore} pts</span>
             </div>
             <div className="w-40 bg-gray-100 h-1.5 rounded-full overflow-hidden">
@@ -245,17 +269,226 @@ export default function AdminDashboard() {
     setConfirmDialog({
       isOpen: true,
       title: 'Delete Material',
-      message: `Delete "${material.title}"? This will remove it from teacher dashboards.`,
+      message: `Delete "${material.title}"? This will remove it from teacher dashboards and remove all associated submissions.`,
       isDanger: true,
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'materials', material.firestoreId || material.id));
-          setNotification({ message: 'Material deleted.', type: 'success' });
+          const submissionsQuery = query(collection(db, 'submissions'), where('materialId', '==', material.id));
+          const submissionsSnapshot = await getDocs(submissionsQuery);
+          const batch = writeBatch(db);
+
+          batch.delete(doc(db, 'materials', material.firestoreId || material.id));
+          submissionsSnapshot.forEach((submissionDoc) => {
+            batch.delete(doc(db, 'submissions', submissionDoc.id));
+          });
+
+          await batch.commit();
+          setNotification({ message: 'Material and related submissions deleted.', type: 'success' });
         } catch (error) {
           handleFirestoreError(error, OperationType.DELETE, 'materials');
         }
       },
     });
+  };
+
+  const handleImportGrades = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      setGradeImporting(true);
+      const rows = await parseAssessmentImportFile(file);
+      const previewRows = rows.map((row, index) => {
+        const normalizedEmail = row.teacherEmail.trim().toLowerCase();
+        const teacher = teachers.find((user) => user.email?.trim().toLowerCase() === normalizedEmail);
+
+        const weekInvalid = typeof row.week !== 'number' || Number.isNaN(row.week) || !WEEKS.includes(row.week);
+        const assessmentId = !weekInvalid ? `test-assessment-week-${row.week}` : undefined;
+        const scoreInvalid = Number.isNaN(row.score) || row.score < 0 || row.score > 100;
+        let status: ImportPreviewStatus = 'ready';
+        let reason = undefined;
+
+        if (scoreInvalid) {
+          status = 'invalidScore';
+          reason = 'Score must be a number between 0 and 100';
+        } else if (weekInvalid) {
+          status = 'invalidWeek';
+          reason = `Week must be one of: ${WEEKS.join(', ')}`;
+        } else if (!teacher) {
+          status = 'missingTeacher';
+          reason = 'Teacher not found for this email';
+        }
+
+        return {
+          ...row,
+          rowNumber: index + 1,
+          teacherName: teacher?.name,
+          teacherId: teacher?.uid,
+          materialTitle: assessmentId ? `Week ${row.week} test score` : undefined,
+          materialId: assessmentId,
+          status,
+          reason,
+        };
+      });
+
+      setImportPreviewRows(previewRows);
+      setImportPreviewFileName(file.name);
+      setNotification({ message: `Preview loaded: ${previewRows.length} rows. Confirm to finish upload.`, type: 'success' });
+    } catch (error) {
+      console.error('Grade import failed:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      setNotification({
+        message: `Could not parse grades. Error: ${errorMsg}. Please check the file format and try again.`,
+        type: 'error',
+      });
+    } finally {
+      setGradeImporting(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleCancelImportPreview = () => {
+    setImportPreviewRows([]);
+    setImportPreviewFileName(null);
+  };
+
+  const handleSubmitManualGrade = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { teacherId, week, score } = manualGradeForm;
+
+    if (!teacherId || !week || !score) {
+      setNotification({ message: 'Please fill in all required fields.', type: 'error' });
+      return;
+    }
+
+    const weekNum = Number.parseInt(week, 10);
+    const scoreNum = Number.parseInt(score, 10);
+
+    if (Number.isNaN(weekNum) || Number.isNaN(scoreNum) || scoreNum < 0 || scoreNum > 100) {
+      setNotification({ message: 'Enter a valid week number and score between 0 and 100.', type: 'error' });
+      return;
+    }
+
+    try {
+      const teacher = teachers.find((t) => t.uid === teacherId);
+      const submissionMaterialId = `test-assessment-week-${weekNum}`;
+
+      if (!teacher) {
+        setNotification({ message: 'Selected teacher not found.', type: 'error' });
+        return;
+      }
+
+      const existingSubmission = submissions.find(
+        (submission) => submission.teacherId === teacher.uid && submission.materialId === submissionMaterialId,
+      );
+
+      const submissionData = {
+        teacherId: teacher.uid,
+        materialId: submissionMaterialId,
+        contentUrl: 'Manual weekly test score',
+        submittedAt: new Date().toISOString(),
+        score: scoreNum,
+        feedback: 'Manually graded by admin',
+        status: 'graded' as const,
+      };
+
+      if (existingSubmission) {
+        await updateDoc(doc(db, 'submissions', existingSubmission.id), submissionData);
+        setNotification({ message: 'Grade updated successfully.', type: 'success' });
+      } else {
+        const submissionRef = doc(collection(db, 'submissions'));
+        await setDoc(submissionRef, { id: submissionRef.id, ...submissionData });
+        setNotification({ message: 'Grade recorded successfully.', type: 'success' });
+      }
+
+      setManualGradeForm({ state: '', teacherId: '', week: '', score: '' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'submissions');
+    }
+  };
+
+  const handleConfirmImportGrades = async () => {
+    const readyRows = importPreviewRows.filter((row) => row.status === 'ready');
+    if (readyRows.length === 0) {
+      setNotification({ message: 'No valid rows are ready to upload.', type: 'error' });
+      return;
+    }
+
+    try {
+      setGradeImporting(true);
+      let created = 0;
+      let updated = 0;
+
+      for (const row of readyRows) {
+        const teacher = teachers.find(
+          (user) => user.email?.trim().toLowerCase() === row.teacherEmail.trim().toLowerCase(),
+        );
+        if (!teacher) {
+          continue;
+        }
+
+        if (typeof row.week !== 'number' || Number.isNaN(row.week)) {
+          continue;
+        }
+
+        const submissionMaterialId = `test-assessment-week-${row.week}`;
+        const existingSubmission = submissions.find(
+          (submission) => submission.teacherId === teacher.uid && submission.materialId === submissionMaterialId,
+        );
+        const contentUrl = row.contentUrl?.trim() || 'Imported weekly test score';
+        const submittedAt = row.submittedAt || new Date().toISOString();
+        const submissionData = {
+          teacherId: teacher.uid,
+          materialId: submissionMaterialId,
+          contentUrl,
+          submittedAt,
+          score: row.score,
+          feedback: row.feedback || '',
+          status: 'graded' as const,
+        };
+
+        if (existingSubmission) {
+          await updateDoc(doc(db, 'submissions', existingSubmission.id), submissionData);
+          updated += 1;
+        } else {
+          const submissionRef = doc(collection(db, 'submissions'));
+          await setDoc(submissionRef, { id: submissionRef.id, ...submissionData });
+          created += 1;
+        }
+      }
+
+      setNotification({
+        message: `Import complete. ${created} created, ${updated} updated.`,
+        type: 'success',
+      });
+      setImportPreviewRows([]);
+      setImportPreviewFileName(null);
+    } catch (error) {
+      console.error('Grade import confirmation failed:', error);
+      setNotification({
+        message: 'Could not upload grades. Please try again.',
+        type: 'error',
+      });
+    } finally {
+      setGradeImporting(false);
+    }
+  };
+
+  const handleDownloadScoreTemplate = () => {
+    const headers = ['Email', 'Score', 'Week'];
+    const sampleRow = ['teacher@example.com', '85', '3'];
+    const csv = `${headers.join(',')}\n${sampleRow.join(',')}\n`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'assessment-score-template.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleGradeSubmission = async (submissionId: string) => {
@@ -573,6 +806,173 @@ export default function AdminDashboard() {
         )}
         {activeTab === 'grading' && (
           <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Import assessment scores</h2>
+                <p className="text-sm text-gray-500">Upload a CSV/Excel file with Email, Score, and Week.</p>
+                <p className="mt-2 text-xs text-gray-500">
+                  Expected columns: <span className="font-semibold">Email, Score, Week</span>.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <label className="inline-flex items-center space-x-2 bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 cursor-pointer transition-all">
+                  <FileSpreadsheet size={18} className="text-emerald-600" />
+                  <span>{gradeImporting ? 'Importing...' : 'Load Scores'}</span>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={handleImportGrades}
+                    disabled={gradeImporting}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={handleDownloadScoreTemplate}
+                  className="inline-flex items-center space-x-2 bg-gray-100 border border-gray-200 rounded-lg px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-all"
+                >
+                  <FileSpreadsheet size={18} className="text-gray-600" />
+                  <span>Download Template</span>
+                </button>
+              </div>
+            </div>
+            {importPreviewRows.length > 0 && (
+              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">Preview imported rows</h3>
+                    <p className="text-sm text-gray-500">
+                      {importPreviewRows.length} row(s) loaded from {importPreviewFileName}. Confirm to write the ready rows to the database.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleConfirmImportGrades}
+                      className="btn-primary"
+                      disabled={gradeImporting || importPreviewRows.every((row) => row.status !== 'ready')}
+                    >
+                      Confirm Upload
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelImportPreview}
+                      className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-200"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+                <div className="overflow-x-auto rounded-lg border border-gray-100">
+                  <table className="min-w-full text-left text-sm text-gray-700">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">#</th>
+                        <th className="px-4 py-3 font-semibold">Email</th>
+                        <th className="px-4 py-3 font-semibold">Score</th>
+                        <th className="px-4 py-3 font-semibold">Week</th>
+                        <th className="px-4 py-3 font-semibold">Teacher</th>
+                        <th className="px-4 py-3 font-semibold">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreviewRows.map((row) => (
+                        <tr key={row.rowNumber} className="border-t border-gray-100">
+                          <td className="px-4 py-3">{row.rowNumber}</td>
+                          <td className="px-4 py-3">{row.teacherEmail}</td>
+                          <td className="px-4 py-3">{row.score}</td>
+                          <td className="px-4 py-3">{row.week ?? '-'}</td>
+                          <td className="px-4 py-3">{row.teacherName ?? 'Not found'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                              row.status === 'ready' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {row.status === 'ready' ? 'Ready' : row.reason}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">Manual grade entry</h3>
+              <form onSubmit={handleSubmitManualGrade} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">State</label>
+                  <select
+                    value={manualGradeForm.state}
+                    onChange={(e) => setManualGradeForm((f) => ({ ...f, state: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">All States</option>
+                    {STATES.map((state) => (
+                      <option key={state} value={state}>
+                        {state}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Teacher</label>
+                  <select
+                    required
+                    value={manualGradeForm.teacherId}
+                    onChange={(e) => setManualGradeForm((f) => ({ ...f, teacherId: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">Select teacher</option>
+                    {teachers
+                      .filter(
+                        (teacher) =>
+                          !manualGradeForm.state ||
+                          teacher.state === manualGradeForm.state,
+                      )
+                      .map((teacher) => (
+                        <option key={teacher.uid} value={teacher.uid}>
+                          {teacher.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Week</label>
+                  <select
+                    required
+                    value={manualGradeForm.week}
+                    onChange={(e) => setManualGradeForm((f) => ({ ...f, week: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">Select week</option>
+                    {WEEKS.map((week) => (
+                      <option key={week} value={week}>
+                        Week {week}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Grade (0-100)</label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    max="100"
+                    value={manualGradeForm.score}
+                    onChange={(e) => setManualGradeForm((f) => ({ ...f, score: e.target.value }))}
+                    placeholder="0-100"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button type="submit" className="btn-primary w-full">
+                    Submit Grade
+                  </button>
+                </div>
+              </form>
+            </div>
             {pendingSubmissions.map((submission) => {
               const teacher = teachers.find((item) => item.uid === submission.teacherId);
               const material = materials.find((item) => item.id === submission.materialId);

@@ -7,6 +7,8 @@ type UserLike = Pick<UserProfile, 'uid' | 'state'>;
 export interface TeacherProgress {
   totalAssignments: number;
   submittedAssignments: number;
+  totalWeeklyTests: number;
+  completedWeeklyTests: number;
   completionRate: number;
   totalScore: number;
   attendanceCount: number;
@@ -52,6 +54,10 @@ function getLatestSubmissionMap(teacherId: string, submissions: AssignmentSubmis
   return latestByMaterial;
 }
 
+function getWeeklyTestScoreId(week: number) {
+  return `test-assessment-week-${week}`;
+}
+
 export function getTeacherProgress(
   teacher: UserProfile,
   materials: LearningMaterial[],
@@ -76,15 +82,30 @@ export function getTeacherProgress(
     }
   }
 
+  for (const week of WEEKS) {
+    const submission = latestSubmissions.get(getWeeklyTestScoreId(week));
+    if (typeof submission?.score === 'number') {
+      totalScore += submission.score;
+    }
+  }
+
+  const completedWeeklyTests = WEEKS.filter((week) => {
+    const submission = latestSubmissions.get(getWeeklyTestScoreId(week));
+    return typeof submission?.score === 'number';
+  }).length;
   const attendanceCount = WEEKS.filter((week) => teacher.attendance?.[`week${week}`]).length;
   const totalAssignments = assignedAssignments.length;
   const submittedAssignments = Object.keys(assignmentCompletion).length;
-  const completionRate = totalAssignments > 0 ? Math.round((submittedAssignments / totalAssignments) * 100) : 0;
+  const totalCompletionItems = totalAssignments + WEEKS.length;
+  const submittedCompletionItems = submittedAssignments + completedWeeklyTests;
+  const completionRate = totalCompletionItems > 0 ? Math.round((submittedCompletionItems / totalCompletionItems) * 100) : 0;
   const attendanceRate = WEEKS.length > 0 ? Math.round((attendanceCount / WEEKS.length) * 100) : 0;
 
   return {
     totalAssignments,
     submittedAssignments,
+    totalWeeklyTests: WEEKS.length,
+    completedWeeklyTests,
     completionRate,
     totalScore,
     attendanceCount,

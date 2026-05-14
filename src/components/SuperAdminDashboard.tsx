@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import {
   AlertTriangle,
@@ -25,7 +25,7 @@ import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { auth, secondaryAuth, db } from '../lib/firebase';
 import { STATES, WEEKS } from '../constants';
-import { AssignmentSubmission, LearningMaterial, PortalSettings, UserProfile, UserRole } from '../types';
+import { AssignmentSubmission, ImportedScoreRow, LearningMaterial, PortalSettings, UserProfile, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
 import {
   getTeacherProfileEditingDisabled,
@@ -34,6 +34,7 @@ import {
   subscribeToPortalSettings,
 } from '../lib/portalSettings';
 import { getTeacherProgress, syncTrainingDerivedData } from '../lib/training';
+import { parseAssessmentImportFile } from '../lib/submissionImport';
 import ConfirmDialog from './ConfirmDialog';
 import DataTable, { DataTableColumn } from './DataTable';
 import Notification, { NotificationType } from './Notification';
@@ -44,6 +45,18 @@ type MaterialFormState = Partial<LearningMaterial> & {
 };
 
 type GradeDraftState = Record<string, { score: string; feedback: string }>;
+
+type ImportPreviewStatus = 'ready' | 'missingTeacher' | 'invalidScore' | 'invalidWeek';
+
+type ImportPreviewRow = ImportedScoreRow & {
+  rowNumber: number;
+  teacherName?: string;
+  teacherId?: string;
+  materialTitle?: string;
+  materialId?: string;
+  status: ImportPreviewStatus;
+  reason?: string;
+};
 
 const defaultMaterialState: MaterialFormState = {
   type: 'slide',
@@ -62,7 +75,21 @@ const defaultNewUser: Partial<UserProfile> = {
   phone: '',
 };
 
-export default function SuperAdminDashboard() {
+function getSubmissionLabel(submission: AssignmentSubmission, materials: LearningMaterial[]) {
+  const material = materials.find((item) => item.id === submission.materialId);
+  if (material) {
+    return material.title;
+  }
+
+  const weeklyTestScoreMatch = submission.materialId.match(/^test-assessment-week-(\d+)$/);
+  if (weeklyTestScoreMatch) {
+    return `Week ${weeklyTestScoreMatch[1]} Test Score`;
+  }
+
+  return 'Unknown Submission';
+}
+
+export default function SuperAdminDashboard({ allowClearAllRecords = true }: { allowClearAllRecords?: boolean }) {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [materials, setMaterials] = useState<LearningMaterial[]>([]);
   const [submissions, setSubmissions] = useState<AssignmentSubmission[]>([]);
@@ -76,6 +103,15 @@ export default function SuperAdminDashboard() {
   const [newMaterial, setNewMaterial] = useState<MaterialFormState>(defaultMaterialState);
   const [newUser, setNewUser] = useState<Partial<UserProfile>>(defaultNewUser);
   const [gradeDrafts, setGradeDrafts] = useState<GradeDraftState>({});
+  const [gradeImporting, setGradeImporting] = useState(false);
+  const [importPreviewRows, setImportPreviewRows] = useState<ImportPreviewRow[]>([]);
+  const [importPreviewFileName, setImportPreviewFileName] = useState<string | null>(null);
+  const [manualGradeForm, setManualGradeForm] = useState({
+    state: '',
+    teacherId: '',
+    week: '',
+    score: '',
+  });
   const [notification, setNotification] = useState<{ message: string; type: NotificationType } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -168,6 +204,9 @@ export default function SuperAdminDashboard() {
   const pendingSubmissions = submissions
     .filter((submission) => submission.status === 'pending')
     .sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt));
+  const gradedSubmissions = submissions
+    .filter((submission) => submission.status === 'graded')
+    .sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt));
 
   const teacherCount = users.filter((user) => user.role === 'teacher').length;
   const adminCount = users.filter((user) => user.role === 'admin').length;
@@ -256,8 +295,37 @@ export default function SuperAdminDashboard() {
       sortValue: (user) => (user.role === 'teacher' ? (teacherProgressMap.get(user.uid)?.totalScore ?? 0) : -1),
       render: (user) => {
         const progress = user.role === 'teacher' ? teacherProgressMap.get(user.uid) : null;
-        return <span className="text-sm text-gray-600">{progress ? `${progress.totalScore} pts / ${progress.attendanceCount} attendance weeks` : 'N/A'}</span>;
+        return (
+          <span className="text-sm text-gray-600">
+            {progress
+              ? `${progress.totalScore} pts / ${progress.completedWeeklyTests} tests / ${progress.attendanceCount} attendance weeks`
+              : 'N/A'}
+          </span>
+        );
       },
+    },
+    {
+      key: 'certificate',
+      header: 'Certificate',
+      sortable: true,
+      sortValue: (user) => (user.role === 'teacher' && user.approvedForCertificate ? 1 : 0),
+      headerClassName: 'text-center',
+      className: 'text-center',
+      render: (user) =>
+        user.role === 'teacher' ? (
+          <button
+            onClick={() => handleApproveCertificate(user.uid, !user.approvedForCertificate)}
+            className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+              user.approvedForCertificate
+                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {user.approvedForCertificate ? 'Approved' : 'Approve'}
+          </button>
+        ) : (
+          <span className="text-xs text-gray-400">N/A</span>
+        ),
     },
     {
       key: 'actions',
@@ -341,21 +409,36 @@ export default function SuperAdminDashboard() {
     }
 
     try {
-      await updateDoc(doc(db, 'users', showEditUser.uid), {
-        name: showEditUser.name,
-        email: showEditUser.email,
-        phone: showEditUser.phone,
-        role: showEditUser.role,
-        state: showEditUser.state,
-        school: showEditUser.school || '',
-        gender: showEditUser.gender || null,
-        attendance: showEditUser.attendance || {},
-        accountNumber: showEditUser.accountNumber || '',
-        bank: showEditUser.bank || '',
+        await updateDoc(doc(db, 'users', showEditUser.uid), {
+          name: showEditUser.name,
+          email: showEditUser.email,
+          phone: showEditUser.phone,
+          role: showEditUser.role,
+          state: showEditUser.state,
+          school: showEditUser.school || '',
+          gender: showEditUser.gender || null,
+          approvedForCertificate: !!showEditUser.approvedForCertificate,
+          attendance: showEditUser.attendance || {},
+          accountNumber: showEditUser.accountNumber || '',
+          bank: showEditUser.bank || '',
         accountName: showEditUser.accountName || '',
       });
       setShowEditUser(null);
       setNotification({ message: 'User updated successfully.', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'users');
+    }
+  };
+
+  const handleApproveCertificate = async (teacherId: string, approved: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', teacherId), {
+        approvedForCertificate: approved,
+      });
+      setNotification({
+        message: approved ? 'Certificate approved.' : 'Certificate approval removed.',
+        type: 'success',
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'users');
     }
@@ -491,6 +574,229 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const handleImportGrades = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      setGradeImporting(true);
+      const rows = await parseAssessmentImportFile(file);
+      const previewRows = rows.map((row, index) => {
+        const normalizedEmail = row.teacherEmail.trim().toLowerCase();
+        const teacher = users.find((user) => user.email?.trim().toLowerCase() === normalizedEmail);
+
+        const weekInvalid = typeof row.week !== 'number' || Number.isNaN(row.week) || !WEEKS.includes(row.week);
+        const assessmentId = !weekInvalid ? `test-assessment-week-${row.week}` : undefined;
+        const scoreInvalid = Number.isNaN(row.score) || row.score < 0 || row.score > 100;
+        let status: ImportPreviewStatus = 'ready';
+        let reason = undefined;
+
+        if (scoreInvalid) {
+          status = 'invalidScore';
+          reason = 'Score must be a number between 0 and 100';
+        } else if (weekInvalid) {
+          status = 'invalidWeek';
+          reason = `Week must be one of: ${WEEKS.join(', ')}`;
+        } else if (!teacher) {
+          status = 'missingTeacher';
+          reason = 'Teacher not found for this email';
+        }
+
+        return {
+          ...row,
+          rowNumber: index + 1,
+          teacherName: teacher?.name,
+          teacherId: teacher?.uid,
+          materialTitle: assessmentId ? `Week ${row.week} test score` : undefined,
+          materialId: assessmentId,
+          status,
+          reason,
+        };
+      });
+
+      setImportPreviewRows(previewRows);
+      setImportPreviewFileName(file.name);
+      setNotification({ message: `Preview loaded: ${previewRows.length} rows. Confirm to finish upload.`, type: 'success' });
+    } catch (error) {
+      console.error('Grade import failed:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      setNotification({
+        message: `Could not parse grades. Error: ${errorMsg}. Please check the file format and try again.`,
+        type: 'error',
+      });
+    } finally {
+      setGradeImporting(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleCancelImportPreview = () => {
+    setImportPreviewRows([]);
+    setImportPreviewFileName(null);
+  };
+
+  const handleConfirmImportGrades = async () => {
+    const readyRows = importPreviewRows.filter((row) => row.status === 'ready');
+    if (readyRows.length === 0) {
+      setNotification({ message: 'No valid rows are ready to upload.', type: 'error' });
+      return;
+    }
+
+    try {
+      setGradeImporting(true);
+      let created = 0;
+      let updated = 0;
+
+      for (const row of readyRows) {
+        const teacher = users.find(
+          (user) => user.email?.trim().toLowerCase() === row.teacherEmail.trim().toLowerCase(),
+        );
+        if (!teacher) {
+          continue;
+        }
+
+        if (typeof row.week !== 'number' || Number.isNaN(row.week)) {
+          continue;
+        }
+
+        const submissionMaterialId = `test-assessment-week-${row.week}`;
+        const existingSubmission = submissions.find(
+          (submission) => submission.teacherId === teacher.uid && submission.materialId === submissionMaterialId,
+        );
+        const contentUrl = row.contentUrl?.trim() || 'Imported weekly test score';
+        const submittedAt = row.submittedAt || new Date().toISOString();
+        const submissionData = {
+          teacherId: teacher.uid,
+          materialId: submissionMaterialId,
+          contentUrl,
+          submittedAt,
+          score: row.score,
+          feedback: row.feedback || '',
+          status: 'graded' as const,
+        };
+
+        if (existingSubmission) {
+          await updateDoc(doc(db, 'submissions', existingSubmission.id), submissionData);
+          updated += 1;
+        } else {
+          const submissionRef = doc(collection(db, 'submissions'));
+          await setDoc(submissionRef, { id: submissionRef.id, ...submissionData });
+          created += 1;
+        }
+      }
+
+      setNotification({
+        message: `Import complete. ${created} created, ${updated} updated.`,
+        type: created + updated > 0 ? 'success' : 'error',
+      });
+      setImportPreviewRows([]);
+      setImportPreviewFileName(null);
+    } catch (error) {
+      console.error('Grade import confirmation failed:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      setNotification({
+        message: `Could not confirm grade import. Error: ${errorMsg}.`,
+        type: 'error',
+      });
+    } finally {
+      setGradeImporting(false);
+    }
+  };
+
+  const handleDownloadScoreTemplate = () => {
+    const headers = ['Email', 'Score', 'Week'];
+    const sampleRow = ['teacher@example.com', '85', '3'];
+    const csv = `${headers.join(',')}\n${sampleRow.join(',')}\n`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'assessment-score-template.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSubmitManualGrade = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { teacherId, week, score } = manualGradeForm;
+
+    if (!teacherId || !week || !score) {
+      setNotification({ message: 'Please fill in all required fields.', type: 'error' });
+      return;
+    }
+
+    const weekNum = Number.parseInt(week, 10);
+    const scoreNum = Number.parseInt(score, 10);
+
+    if (Number.isNaN(weekNum) || Number.isNaN(scoreNum) || scoreNum < 0 || scoreNum > 100) {
+      setNotification({ message: 'Enter a valid week number and score between 0 and 100.', type: 'error' });
+      return;
+    }
+
+    try {
+      const teacher = users.find((t) => t.uid === teacherId);
+      const submissionMaterialId = `test-assessment-week-${weekNum}`;
+
+      if (!teacher) {
+        setNotification({ message: 'Selected teacher not found.', type: 'error' });
+        return;
+      }
+
+      const existingSubmission = submissions.find(
+        (submission) => submission.teacherId === teacher.uid && submission.materialId === submissionMaterialId,
+      );
+
+      const submissionData = {
+        teacherId: teacher.uid,
+        materialId: submissionMaterialId,
+        contentUrl: 'Manual weekly test score',
+        submittedAt: new Date().toISOString(),
+        score: scoreNum,
+        feedback: 'Manually graded by admin',
+        status: 'graded' as const,
+      };
+
+      if (existingSubmission) {
+        await updateDoc(doc(db, 'submissions', existingSubmission.id), submissionData);
+        setNotification({ message: 'Grade updated successfully.', type: 'success' });
+      } else {
+        const submissionRef = doc(collection(db, 'submissions'));
+        await setDoc(submissionRef, { id: submissionRef.id, ...submissionData });
+        setNotification({ message: 'Grade recorded successfully.', type: 'success' });
+      }
+
+      setManualGradeForm({ state: '', teacherId: '', week: '', score: '' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'submissions');
+    }
+  };
+
+  const handleDeleteSubmission = (submissionId: string, label = 'this submission record') => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Submission',
+      message: `Delete ${label}? This cannot be undone.`,
+      isDanger: true,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'submissions', submissionId));
+          setGradeDrafts((current) => {
+            const next = { ...current };
+            delete next[submissionId];
+            return next;
+          });
+          setNotification({ message: 'Submission deleted successfully.', type: 'success' });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'submissions');
+        }
+      },
+    });
+  };
+
   const handleGradeSubmission = async (submissionId: string) => {
     const draft = gradeDrafts[submissionId];
     const score = Number.parseInt(draft?.score || '', 10);
@@ -522,12 +828,21 @@ export default function SuperAdminDashboard() {
     setConfirmDialog({
       isOpen: true,
       title: 'Delete Material',
-      message: `Delete "${material.title}"? This cannot be undone.`,
+      message: `Delete "${material.title}"? This cannot be undone. All related submissions will also be deleted.`,
       isDanger: true,
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'materials', material.firestoreId || material.id));
-          setNotification({ message: 'Material deleted successfully.', type: 'success' });
+          const submissionsQuery = query(collection(db, 'submissions'), where('materialId', '==', material.id));
+          const submissionsSnapshot = await getDocs(submissionsQuery);
+          const batch = writeBatch(db);
+
+          batch.delete(doc(db, 'materials', material.firestoreId || material.id));
+          submissionsSnapshot.forEach((submissionDoc) => {
+            batch.delete(doc(db, 'submissions', submissionDoc.id));
+          });
+
+          await batch.commit();
+          setNotification({ message: 'Material and related submissions deleted successfully.', type: 'success' });
         } catch (error) {
           handleFirestoreError(error, OperationType.DELETE, 'materials');
         }
@@ -717,23 +1032,25 @@ export default function SuperAdminDashboard() {
             </div>
           </div>
 
-          <div className="bg-red-50 rounded-2xl p-8 border border-red-100">
-            <div className="flex items-center space-x-3 mb-4 text-red-600">
-              <AlertTriangle size={24} />
-              <h2 className="text-xl font-bold">Danger Zone</h2>
+          {allowClearAllRecords && (
+            <div className="bg-red-50 rounded-2xl p-8 border border-red-100">
+              <div className="flex items-center space-x-3 mb-4 text-red-600">
+                <AlertTriangle size={24} />
+                <h2 className="text-xl font-bold">Danger Zone</h2>
+              </div>
+              <p className="text-red-700 mb-6 max-w-2xl">
+                Clearing users only removes their Firestore records. You must still manually remove their authentication
+                accounts in the Firebase Authentication Console for a full deletion.
+              </p>
+              <button
+                onClick={handleClearAllUsers}
+                className="bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition-colors flex items-center space-x-2 shadow-sm"
+              >
+                <Trash2 size={20} />
+                <span>Clear All User Records</span>
+              </button>
             </div>
-            <p className="text-red-700 mb-6 max-w-2xl">
-              Clearing users only removes their Firestore records. You must still manually remove their authentication
-              accounts in the Firebase Authentication Console for a full deletion.
-            </p>
-            <button
-              onClick={handleClearAllUsers}
-              className="bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition-colors flex items-center space-x-2 shadow-sm"
-            >
-              <Trash2 size={20} />
-              <span>Clear All User Records</span>
-            </button>
-          </div>
+          )}
         </>
       )}
       {activeTab === 'materials' && (
@@ -799,8 +1116,174 @@ export default function SuperAdminDashboard() {
 
       {activeTab === 'grading' && (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">Grading and Assessments</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Import assessment scores</h2>
+              <p className="text-sm text-gray-500">Upload a CSV/Excel file with Email, Score, and Week.</p>
+              <p className="mt-2 text-xs text-gray-500">
+                Expected columns: <span className="font-semibold">Email, Score, Week</span>.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <label className="inline-flex items-center space-x-2 bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 cursor-pointer transition-all">
+                <FileSpreadsheet size={18} className="text-emerald-600" />
+                <span>{gradeImporting ? 'Importing...' : 'Import Scores'}</span>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={handleImportGrades}
+                  disabled={gradeImporting}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={handleDownloadScoreTemplate}
+                className="inline-flex items-center space-x-2 bg-gray-100 border border-gray-200 rounded-lg px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-all"
+              >
+                <FileSpreadsheet size={18} className="text-gray-600" />
+                <span>Download Template</span>
+              </button>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Manual grade entry</h3>
+            <form onSubmit={handleSubmitManualGrade} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">State</label>
+                <select
+                  value={manualGradeForm.state}
+                  onChange={(e) => setManualGradeForm((f) => ({ ...f, state: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">All States</option>
+                  {STATES.map((state) => (
+                    <option key={state} value={state}>
+                      {state}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Teacher</label>
+                <select
+                  required
+                  value={manualGradeForm.teacherId}
+                  onChange={(e) => setManualGradeForm((f) => ({ ...f, teacherId: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">Select teacher</option>
+                  {users
+                    .filter(
+                      (user) =>
+                        user.role === 'teacher' &&
+                        (!manualGradeForm.state || user.state === manualGradeForm.state),
+                    )
+                    .map((user) => (
+                      <option key={user.uid} value={user.uid}>
+                        {user.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Week</label>
+                <select
+                  required
+                  value={manualGradeForm.week}
+                  onChange={(e) => setManualGradeForm((f) => ({ ...f, week: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">Select week</option>
+                  {WEEKS.map((week) => (
+                    <option key={week} value={week}>
+                      Week {week}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Grade (0-100)</label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  max="100"
+                  value={manualGradeForm.score}
+                  onChange={(e) => setManualGradeForm((f) => ({ ...f, score: e.target.value }))}
+                  placeholder="0-100"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="flex items-end">
+                <button type="submit" className="btn-primary w-full">
+                  Submit Grade
+                </button>
+              </div>
+            </form>
+          </div>
           <div className="space-y-4">
+            {importPreviewRows.length > 0 && (
+              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">Preview imported rows</h3>
+                    <p className="text-sm text-gray-500">
+                      {importPreviewRows.length} row(s) loaded from {importPreviewFileName}. Confirm to write the ready rows to the database.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleConfirmImportGrades}
+                      className="btn-primary"
+                      disabled={gradeImporting || importPreviewRows.every((row) => row.status !== 'ready')}
+                    >
+                      Confirm Upload
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelImportPreview}
+                      className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-200"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+                <div className="overflow-x-auto rounded-lg border border-gray-100">
+                  <table className="min-w-full text-left text-sm text-gray-700">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">#</th>
+                        <th className="px-4 py-3 font-semibold">Email</th>
+                        <th className="px-4 py-3 font-semibold">Score</th>
+                        <th className="px-4 py-3 font-semibold">Week</th>
+                        <th className="px-4 py-3 font-semibold">Teacher</th>
+                        <th className="px-4 py-3 font-semibold">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreviewRows.map((row) => (
+                        <tr key={row.rowNumber} className="border-t border-gray-100">
+                          <td className="px-4 py-3">{row.rowNumber}</td>
+                          <td className="px-4 py-3">{row.teacherEmail}</td>
+                          <td className="px-4 py-3">{row.score}</td>
+                          <td className="px-4 py-3">{row.week ?? '-'}</td>
+                          <td className="px-4 py-3">{row.teacherName ?? 'Not found'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                              row.status === 'ready' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {row.status === 'ready' ? 'Ready' : row.reason}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
             {pendingSubmissions.map((submission) => {
               const teacher = users.find((user) => user.uid === submission.teacherId);
               const material = materials.find((item) => item.id === submission.materialId);
@@ -857,6 +1340,13 @@ export default function SuperAdminDashboard() {
                     <button onClick={() => handleGradeSubmission(submission.id)} className="btn-primary">
                       Submit Grade
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSubmission(submission.id)}
+                      className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               );
@@ -866,6 +1356,67 @@ export default function SuperAdminDashboard() {
                 <p className="text-gray-500">No pending submissions to grade.</p>
               </div>
             )}
+            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+              <div className="mb-4">
+                <h3 className="text-lg font-bold text-gray-900">Graded submission records</h3>
+                <p className="text-sm text-gray-500">Review uploaded and manually graded records, then delete incorrect entries if needed.</p>
+              </div>
+              {gradedSubmissions.length > 0 ? (
+                <div className="overflow-x-auto rounded-lg border border-gray-100">
+                  <table className="min-w-full text-left text-sm text-gray-700">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Teacher</th>
+                        <th className="px-4 py-3 font-semibold">Record</th>
+                        <th className="px-4 py-3 font-semibold">Score</th>
+                        <th className="px-4 py-3 font-semibold">Feedback</th>
+                        <th className="px-4 py-3 font-semibold">Submitted</th>
+                        <th className="px-4 py-3 font-semibold text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gradedSubmissions.map((submission) => {
+                        const teacher = users.find((user) => user.uid === submission.teacherId);
+                        const submissionLabel = getSubmissionLabel(submission, materials);
+                        const deleteLabel = `${submissionLabel} for ${teacher?.name || 'Unknown User'}`;
+
+                        return (
+                          <tr key={submission.id} className="border-t border-gray-100">
+                            <td className="px-4 py-3">
+                              <div>
+                                <p className="font-semibold text-gray-900">{teacher?.name || 'Unknown User'}</p>
+                                <p className="text-xs text-gray-500">{teacher?.email || submission.teacherId}</p>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">{submissionLabel}</td>
+                            <td className="px-4 py-3 font-bold text-gray-900">
+                              {typeof submission.score === 'number' ? `${submission.score}/100` : '-'}
+                            </td>
+                            <td className="px-4 py-3 max-w-xs truncate">{submission.feedback || '-'}</td>
+                            <td className="px-4 py-3">
+                              {submission.submittedAt ? new Date(submission.submittedAt).toLocaleDateString() : '-'}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSubmission(submission.id, deleteLabel)}
+                                className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-10 rounded-lg border border-dashed border-gray-200">
+                  <p className="text-gray-500">No graded submission records yet.</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1087,6 +1638,21 @@ export default function SuperAdminDashboard() {
                   onChange={(e) => setShowEditUser({ ...showEditUser, accountName: e.target.value })}
                 />
               </div>
+              {showEditUser.role === 'teacher' && (
+                <label className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium flex items-center justify-between">
+                  <span>Approved for certificate</span>
+                  <input
+                    type="checkbox"
+                    checked={!!showEditUser.approvedForCertificate}
+                    onChange={(e) =>
+                      setShowEditUser({
+                        ...showEditUser,
+                        approvedForCertificate: e.target.checked,
+                      })
+                    }
+                  />
+                </label>
+              )}
               {showEditUser.role === 'teacher' && (
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Attendance by Week</label>

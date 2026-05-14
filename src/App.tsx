@@ -10,7 +10,6 @@ import { UserProfile } from './types';
 import PublicDashboard from './components/PublicDashboard';
 import LandingPage from './components/LandingPage';
 import TeacherDashboard from './components/TeacherDashboard';
-import AdminDashboard from './components/AdminDashboard';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import Login from './components/Login';
 import foundationLogo from './assets/foundation-logo.png';
@@ -268,10 +267,8 @@ export default function App() {
               path="/dashboard"
               element={
                 user ? (
-                  user.role === 'super-admin' ? (
-                    <SuperAdminDashboard />
-                  ) : user.role === 'admin' ? (
-                    <AdminDashboard />
+                  user.role === 'super-admin' || user.role === 'admin' ? (
+                    <SuperAdminDashboard allowClearAllRecords={user.role === 'super-admin'} />
                   ) : (
                     <TeacherDashboard user={user} />
                   )

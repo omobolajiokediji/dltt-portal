@@ -53,6 +53,11 @@ function buildCertificateMarkup(user: UserProfile) {
 </svg>`;
 }
 
+function getWeeklyTestScoreLabel(materialId: string) {
+  const match = materialId.match(/^test-assessment-week-(\d+)$/);
+  return match ? `Week ${match[1]} Test Score` : null;
+}
+
 export default function TeacherDashboard({ user }: { user: UserProfile }) {
   const [materials, setMaterials] = useState<LearningMaterial[]>([]);
   const [submissions, setSubmissions] = useState<AssignmentSubmission[]>([]);
@@ -280,9 +285,12 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
           <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Assignments Completed</p>
+                <p className="text-sm text-gray-500">Training Completion</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {progress.submittedAssignments}/{progress.totalAssignments}
+                  {progress.completionRate}%
+                </p>
+                <p className="text-xs text-gray-500">
+                  {progress.submittedAssignments}/{progress.totalAssignments} assignments · {progress.completedWeeklyTests}/{progress.totalWeeklyTests} tests
                 </p>
               </div>
               <FileText className="text-dltt-green" />
@@ -464,13 +472,14 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
               <tbody>
                 {submissions.map((submission) => {
                   const material = assignmentMaterials.find((item) => item.id === submission.materialId);
+                  const weeklyTestScoreLabel = getWeeklyTestScoreLabel(submission.materialId);
                   const isLatestSubmission = latestSubmissionByMaterial.get(submission.materialId)?.id === submission.id;
                   const canEdit = submission.status === 'pending' && isLatestSubmission && material;
 
                   return (
                     <tr key={submission.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
-                        <p className="font-medium text-gray-900">{material?.title || 'Unknown Assignment'}</p>
+                        <p className="font-medium text-gray-900">{material?.title || weeklyTestScoreLabel || 'Unknown Assignment'}</p>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">
                         {new Date(submission.submittedAt).toLocaleDateString()}
@@ -554,6 +563,10 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                     <li className="flex items-center">
                       <CheckCircle2 size={14} className="mr-2" />
                       Assignments submitted: {progress.submittedAssignments}/{progress.totalAssignments}
+                    </li>
+                    <li className="flex items-center">
+                      <CheckCircle2 size={14} className="mr-2" />
+                      Weekly tests completed: {progress.completedWeeklyTests}/{progress.totalWeeklyTests}
                     </li>
                     <li className="flex items-center">
                       <CheckCircle2 size={14} className="mr-2" />

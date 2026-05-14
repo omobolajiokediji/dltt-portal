@@ -28,7 +28,7 @@ service cloud.firestore {
     //   - id: string (required)
     //   - title: string (required)
     //   - description: string (optional)
-    //   - type: string (required, enum: slide, pdf, assignment, video, audio)
+    //   - type: string (required, enum: slide, pdf, assignment)
     //   - contentUrl: string (required)
     //   - assignedTo: list (required)
     //   - assignedStates: list (required)
@@ -93,14 +93,6 @@ service cloud.firestore {
              data.state is string;
     }
 
-    function isValidUserUpdate() {
-      let nextData = request.resource.data;
-      return nextData.uid is string &&
-             nextData.name is string && nextData.name.size() < 100 &&
-             nextData.role in ['super-admin', 'admin', 'teacher'] &&
-             nextData.state is string;
-    }
-
     function isValidMaterial(data) {
       return data.keys().hasAll(['id', 'title', 'type', 'contentUrl', 'week']) &&
              data.title is string && data.title.size() < 200 &&
@@ -119,19 +111,40 @@ service cloud.firestore {
              data.status == 'pending';
     }
 
-    function teacherCanUpdateSubmission() {
-      return isAuthenticated() &&
-             resource.data.teacherId == request.auth.uid &&
-             resource.data.status == 'pending' &&
-             request.resource.data.teacherId == resource.data.teacherId &&
-             request.resource.data.materialId == resource.data.materialId &&
-             request.resource.data.status == 'pending' &&
-             request.resource.data.id == resource.data.id;
+    function isValidAdminSubmission(data) {
+      return data.keys().hasAll(['id', 'teacherId', 'materialId', 'contentUrl', 'submittedAt', 'score', 'feedback', 'status']) &&
+             data.id is string &&
+             data.teacherId is string &&
+             data.materialId is string &&
+             data.contentUrl is string &&
+             data.submittedAt is string &&
+             data.score is number &&
+             data.score >= 0 &&
+             data.score <= 100 &&
+             data.feedback is string &&
+             data.status in ['pending', 'graded'];
     }
 
-    function teacherProfileEditingDisabled() {
-      return exists(/databases/$(database)/documents/settings/portal) &&
-             get(/databases/$(database)/documents/settings/portal).data.teacherProfileEditingDisabled == true;
+    function isValidAdminSubmissionUpdate(data) {
+      return data.keys().hasAll(['teacherId', 'materialId', 'contentUrl', 'submittedAt', 'score', 'feedback', 'status']) &&
+             data.teacherId is string &&
+             data.materialId is string &&
+             data.contentUrl is string &&
+             data.submittedAt is string &&
+             data.score is number &&
+             data.score >= 0 &&
+             data.score <= 100 &&
+             data.feedback is string &&
+             data.status in ['pending', 'graded'];
+    }
+
+    function adminCanUpdateSubmission() {
+      return isAuthenticated() &&
+             request.resource.data.teacherId == resource.data.teacherId &&
+             request.resource.data.materialId == resource.data.materialId &&
+             (!resource.data.keys().hasAny(['id']) || request.resource.data.id == resource.data.id) &&
+             isValidAdminSubmissionUpdate(request.resource.data) &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['score', 'feedback', 'status', 'contentUrl', 'submittedAt']);
     }
 
     // ===============================================================
@@ -141,17 +154,13 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if (isAdmin() || isSuperAdmin()) && isValidUser(request.resource.data);
-      allow update: if (
-        isAdmin() ||
-        isSuperAdmin() ||
-        (isOwner(userId) && request.resource.data.role == resource.data.role && !teacherProfileEditingDisabled())
-      ) && isValidUserUpdate();
-      allow delete: if isSuperAdmin();
+      allow update: if (isAdmin() || isSuperAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role)) && isValidUser(request.resource.data);
+      allow delete: if isAdmin() || isSuperAdmin();
     }
 
     match /settings/{docId} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
     }
 
     match /materials/{materialId} {
@@ -161,10 +170,10 @@ service cloud.firestore {
 
     match /submissions/{submissionId} {
       allow read: if isAuthenticated() && (isOwner(resource.data.teacherId) || isAdmin() || isSuperAdmin());
-      allow create: if isAuthenticated() && isValidSubmission(request.resource.data);
-      allow update: if ((isAdmin() || isSuperAdmin()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['score', 'feedback', 'status'])) ||
-                    (teacherCanUpdateSubmission() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['contentUrl', 'submittedAt']));
-      allow delete: if isSuperAdmin();
+      allow create: if ((isAdmin() || isSuperAdmin()) && isValidAdminSubmission(request.resource.data)) ||
+                    (isAuthenticated() && isValidSubmission(request.resource.data));
+      allow update: if (isAdmin() || isSuperAdmin()) && adminCanUpdateSubmission();
+      allow delete: if isAdmin() || isSuperAdmin();
     }
 
     match /stats/{docId} {

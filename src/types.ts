@@ -51,6 +51,17 @@ export interface AssignmentSubmission {
   status: 'pending' | 'graded';
 }
 
+export interface ImportedScoreRow {
+  teacherEmail: string;
+  score: number;
+  week?: number;
+  feedback?: string;
+  materialId?: string;
+  materialTitle?: string;
+  contentUrl?: string;
+  submittedAt?: string;
+}
+
 export interface GenderDistributionItem {
   label: string;
   count: number;
