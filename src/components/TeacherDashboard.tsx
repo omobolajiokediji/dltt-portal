@@ -18,6 +18,7 @@ import { motion } from 'motion/react';
 import { db } from '../lib/firebase';
 import { AssignmentSubmission, LearningMaterial, PortalSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
+import { sortMaterialsByNewest } from '../lib/materials';
 import { getTeacherProfileEditingDisabled, subscribeToPortalSettings } from '../lib/portalSettings';
 import { getTeacherProgress, isMaterialAssignedToUser } from '../lib/training';
 import Modal from './Modal';
@@ -99,11 +100,9 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
           firestoreId: materialDoc.id,
         })) as LearningMaterial[];
 
-        const filteredMaterials = allMaterials
-          .filter((material) => isMaterialAssignedToUser(material, user))
-          .sort((a, b) => a.week - b.week);
+        const filteredMaterials = allMaterials.filter((material) => isMaterialAssignedToUser(material, user));
 
-        setMaterials(filteredMaterials);
+        setMaterials(sortMaterialsByNewest(filteredMaterials));
         setLoading(false);
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'materials'),

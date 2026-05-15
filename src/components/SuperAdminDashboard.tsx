@@ -6,6 +6,7 @@ import {
   AudioWaveform,
   BookOpen,
   CheckCircle,
+  ChevronDown,
   Edit,
   FileSpreadsheet,
   FileText,
@@ -27,6 +28,7 @@ import { auth, secondaryAuth, db } from '../lib/firebase';
 import { STATES, WEEKS } from '../constants';
 import { AssignmentSubmission, ImportedScoreRow, LearningMaterial, PortalSettings, UserProfile, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
+import { getMaterialCreatedAtTime, sortMaterialsByNewest } from '../lib/materials';
 import {
   getTeacherProfileEditingDisabled,
   describePortalSettingsStorage,
@@ -100,6 +102,7 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
   const [showAddUser, setShowAddUser] = useState(false);
   const [showEditUser, setShowEditUser] = useState<UserProfile | null>(null);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
+  const [expandedMaterialWeeks, setExpandedMaterialWeeks] = useState<Set<number>>(new Set(WEEKS));
   const [newMaterial, setNewMaterial] = useState<MaterialFormState>(defaultMaterialState);
   const [newUser, setNewUser] = useState<Partial<UserProfile>>(defaultNewUser);
   const [gradeDrafts, setGradeDrafts] = useState<GradeDraftState>({});
@@ -211,6 +214,37 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
   const teacherCount = users.filter((user) => user.role === 'teacher').length;
   const adminCount = users.filter((user) => user.role === 'admin').length;
   const isTeacherProfileEditingDisabled = getTeacherProfileEditingDisabled(portalSettings);
+  const materialWeekGroups = useMemo(() => {
+    const groups = new Map<number, LearningMaterial[]>();
+
+    sortMaterialsByNewest(materials).forEach((material) => {
+      const weekMaterials = groups.get(material.week) || [];
+      weekMaterials.push(material);
+      groups.set(material.week, weekMaterials);
+    });
+
+    return Array.from(groups.entries())
+      .map(([week, weekMaterials]) => ({
+        week,
+        materials: weekMaterials,
+        latestUploadTime: Math.max(...weekMaterials.map(getMaterialCreatedAtTime)),
+      }))
+      .sort((a, b) => b.latestUploadTime - a.latestUploadTime || b.week - a.week);
+  }, [materials]);
+
+  const toggleMaterialWeekExpanded = (week: number) => {
+    setExpandedMaterialWeeks((current) => {
+      const next = new Set(current);
+
+      if (next.has(week)) {
+        next.delete(week);
+      } else {
+        next.add(week);
+      }
+
+      return next;
+    });
+  };
 
   const userColumns: DataTableColumn<UserProfile>[] = [
     {
@@ -1063,53 +1097,95 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
             </button>
           </div>
           <div className="grid grid-cols-1 gap-4">
-            {materials
-              .slice()
-              .sort((a, b) => a.week - b.week)
-              .map((material) => (
-                <div key={material.id} className="card flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div className="flex items-center space-x-4">
-                    <div
-                      className={`p-3 rounded-lg ${
-                        material.type === 'assignment' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
-                      }`}
+            {materialWeekGroups.map(({ week, materials: weekMaterials }) => {
+              const isExpanded = expandedMaterialWeeks.has(week);
+
+              return (
+                <div key={week} className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleMaterialWeekExpanded(week)}
+                    className="w-full flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-white px-4 py-3 text-left shadow-sm transition-all hover:shadow-md"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="bg-dltt-green text-white w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold">
+                        W{week}
+                      </span>
+                      <div>
+                        <h3 className="font-bold text-gray-900">Week {week} Materials</h3>
+                        <p className="text-sm text-gray-500">
+                          {weekMaterials.length} item{weekMaterials.length === 1 ? '' : 's'} - newest uploads first
+                        </p>
+                      </div>
+                    </div>
+                    <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                      <ChevronDown size={20} className="text-gray-500" />
+                    </motion.div>
+                  </button>
+
+                  {isExpanded && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="grid grid-cols-1 gap-4"
                     >
-                      {material.type === 'assignment' ? (
-                        <FileText size={24} />
-                      ) : material.type === 'video' ? (
-                        <Video size={24} />
-                      ) : material.type === 'audio' ? (
-                        <AudioWaveform size={24} />
-                      ) : (
-                        <BookOpen size={24} />
-                      )}
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-gray-900">{material.title}</h3>
-                      <p className="text-sm text-gray-500">
-                        Week {material.week} - {material.type.toUpperCase()}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right hidden sm:block">
-                      <p className="text-xs text-gray-400 uppercase font-bold">States</p>
-                      <p className="text-sm text-gray-600">
-                        {material.assignedStates.includes('all') ? 'All States' : material.assignedStates.join(', ')}
-                      </p>
-                    </div>
-                    <div className="text-right hidden sm:block">
-                      <p className="text-xs text-gray-400 uppercase font-bold">Users</p>
-                      <p className="text-sm text-gray-600">
-                        {material.assignedTo.includes('all') ? 'All Users' : `${material.assignedTo.length} selected`}
-                      </p>
-                    </div>
-                    <button onClick={() => handleDeleteMaterial(material)} className="p-2 text-gray-400 hover:text-red-600">
-                      <Trash2 size={20} />
-                    </button>
-                  </div>
+                      {weekMaterials.map((material) => (
+                        <div
+                          key={material.id}
+                          className="card flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4"
+                        >
+                          <div className="flex items-center space-x-4">
+                            <div
+                              className={`p-3 rounded-lg ${
+                                material.type === 'assignment' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
+                              }`}
+                            >
+                              {material.type === 'assignment' ? (
+                                <FileText size={24} />
+                              ) : material.type === 'video' ? (
+                                <Video size={24} />
+                              ) : material.type === 'audio' ? (
+                                <AudioWaveform size={24} />
+                              ) : (
+                                <BookOpen size={24} />
+                              )}
+                            </div>
+                            <div>
+                              <h3 className="font-bold text-gray-900">{material.title}</h3>
+                              <p className="text-sm text-gray-500">
+                                Week {material.week} - {material.type.toUpperCase()}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-right hidden sm:block">
+                              <p className="text-xs text-gray-400 uppercase font-bold">States</p>
+                              <p className="text-sm text-gray-600">
+                                {material.assignedStates.includes('all') ? 'All States' : material.assignedStates.join(', ')}
+                              </p>
+                            </div>
+                            <div className="text-right hidden sm:block">
+                              <p className="text-xs text-gray-400 uppercase font-bold">Users</p>
+                              <p className="text-sm text-gray-600">
+                                {material.assignedTo.includes('all') ? 'All Users' : `${material.assignedTo.length} selected`}
+                              </p>
+                            </div>
+                            <button onClick={() => handleDeleteMaterial(material)} className="p-2 text-gray-400 hover:text-red-600">
+                              <Trash2 size={20} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </motion.div>
+                  )}
                 </div>
-              ))}
+              );
+            })}
+            {materialWeekGroups.length === 0 && (
+              <div className="card text-center text-gray-500">No learning materials have been uploaded yet.</div>
+            )}
           </div>
         </div>
       )}
