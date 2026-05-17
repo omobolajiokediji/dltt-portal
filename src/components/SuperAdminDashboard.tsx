@@ -1,5 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, deleteDoc, doc, getDocs, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  deleteField,
+  doc,
+  getDocs,
+  onSnapshot,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+  writeBatch,
+} from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import {
   AlertTriangle,
@@ -67,6 +79,14 @@ const defaultMaterialState: MaterialFormState = {
   assignedStates: ['all'],
 };
 
+function getMaterialFormState(material: LearningMaterial): MaterialFormState {
+  return {
+    ...material,
+    assignedTo: material.assignedTo?.length ? material.assignedTo : ['all'],
+    assignedStates: material.assignedStates?.length ? material.assignedStates : ['all'],
+  };
+}
+
 const defaultNewUser: Partial<UserProfile> = {
   role: 'teacher',
   state: 'Lagos State',
@@ -102,6 +122,7 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
   const [showAddUser, setShowAddUser] = useState(false);
   const [showEditUser, setShowEditUser] = useState<UserProfile | null>(null);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
+  const [editingMaterial, setEditingMaterial] = useState<LearningMaterial | null>(null);
   const [expandedMaterialWeeks, setExpandedMaterialWeeks] = useState<Set<number>>(new Set(WEEKS));
   const [newMaterial, setNewMaterial] = useState<MaterialFormState>(defaultMaterialState);
   const [newUser, setNewUser] = useState<Partial<UserProfile>>(defaultNewUser);
@@ -586,25 +607,65 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
     reader.readAsArrayBuffer(file);
   };
 
-  const handleAddMaterial = async (e: React.FormEvent) => {
+  const handleOpenAddMaterial = () => {
+    setEditingMaterial(null);
+    setNewMaterial(defaultMaterialState);
+    setShowAddMaterial(true);
+  };
+
+  const handleOpenEditMaterial = (material: LearningMaterial) => {
+    setEditingMaterial(material);
+    setNewMaterial(getMaterialFormState(material));
+    setShowAddMaterial(true);
+  };
+
+  const handleCloseMaterialForm = () => {
+    setShowAddMaterial(false);
+    setEditingMaterial(null);
+    setNewMaterial(defaultMaterialState);
+  };
+
+  const handleSaveMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
 
     try {
-      const materialRef = doc(collection(db, 'materials'));
-      const materialData = {
-        ...newMaterial,
-        id: materialRef.id,
-        createdAt: new Date().toISOString(),
-        assignedTo: newMaterial.assignedTo.length > 0 ? newMaterial.assignedTo : ['all'],
-        assignedStates: newMaterial.assignedStates.length > 0 ? newMaterial.assignedStates : ['all'],
-      } as LearningMaterial;
+      const assignedTo = newMaterial.assignedTo.length > 0 ? newMaterial.assignedTo : ['all'];
+      const assignedStates = newMaterial.assignedStates.length > 0 ? newMaterial.assignedStates : ['all'];
 
-      await setDoc(materialRef, materialData);
-      setShowAddMaterial(false);
-      setNewMaterial(defaultMaterialState);
-      setNotification({ message: 'Material added successfully.', type: 'success' });
+      if (editingMaterial) {
+        await updateDoc(doc(db, 'materials', editingMaterial.firestoreId || editingMaterial.id), {
+          title: newMaterial.title || '',
+          description: newMaterial.description || '',
+          type: newMaterial.type || 'slide',
+          contentUrl: newMaterial.contentUrl || '',
+          week: newMaterial.week || 1,
+          assignedTo,
+          assignedStates,
+          dueDate: newMaterial.type === 'assignment' ? newMaterial.dueDate || '' : deleteField(),
+        });
+        setNotification({ message: 'Material updated successfully.', type: 'success' });
+      } else {
+        const materialRef = doc(collection(db, 'materials'));
+        const materialData = {
+          id: materialRef.id,
+          title: newMaterial.title || '',
+          description: newMaterial.description || '',
+          type: newMaterial.type || 'slide',
+          contentUrl: newMaterial.contentUrl || '',
+          week: newMaterial.week || 1,
+          createdAt: new Date().toISOString(),
+          assignedTo,
+          assignedStates,
+          ...(newMaterial.type === 'assignment' ? { dueDate: newMaterial.dueDate || '' } : {}),
+        } as LearningMaterial;
+
+        await setDoc(materialRef, materialData);
+        setNotification({ message: 'Material added successfully.', type: 'success' });
+      }
+
+      handleCloseMaterialForm();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'materials');
+      handleFirestoreError(error, editingMaterial ? OperationType.UPDATE : OperationType.CREATE, 'materials');
     }
   };
 
@@ -830,6 +891,83 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
       },
     });
   };
+
+  const gradedSubmissionColumns: DataTableColumn<AssignmentSubmission>[] = [
+    {
+      key: 'teacher',
+      header: 'Teacher',
+      sortable: true,
+      sortValue: (submission) => users.find((user) => user.uid === submission.teacherId)?.name || 'Unknown User',
+      render: (submission) => {
+        const teacher = users.find((user) => user.uid === submission.teacherId);
+
+        return (
+          <div>
+            <p className="font-semibold text-gray-900">{teacher?.name || 'Unknown User'}</p>
+            <p className="text-xs text-gray-500">{teacher?.email || submission.teacherId}</p>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'record',
+      header: 'Record',
+      sortable: true,
+      sortValue: (submission) => getSubmissionLabel(submission, materials),
+      render: (submission) => <span className="text-sm text-gray-700">{getSubmissionLabel(submission, materials)}</span>,
+    },
+    {
+      key: 'score',
+      header: 'Score',
+      sortable: true,
+      sortValue: (submission) => submission.score ?? -1,
+      render: (submission) => (
+        <span className="font-bold text-gray-900">
+          {typeof submission.score === 'number' ? `${submission.score}/100` : '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'feedback',
+      header: 'Feedback',
+      sortable: true,
+      sortValue: (submission) => submission.feedback || '',
+      className: 'max-w-xs',
+      render: (submission) => <p className="truncate text-sm text-gray-600">{submission.feedback || '-'}</p>,
+    },
+    {
+      key: 'submitted',
+      header: 'Submitted',
+      sortable: true,
+      sortValue: (submission) => Date.parse(submission.submittedAt || '') || 0,
+      render: (submission) => (
+        <span className="text-sm text-gray-600">
+          {submission.submittedAt ? new Date(submission.submittedAt).toLocaleDateString() : '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Action',
+      headerClassName: 'text-right',
+      className: 'text-right',
+      render: (submission) => {
+        const teacher = users.find((user) => user.uid === submission.teacherId);
+        const submissionLabel = getSubmissionLabel(submission, materials);
+        const deleteLabel = `${submissionLabel} for ${teacher?.name || 'Unknown User'}`;
+
+        return (
+          <button
+            type="button"
+            onClick={() => handleDeleteSubmission(submission.id, deleteLabel)}
+            className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
+          >
+            Delete
+          </button>
+        );
+      },
+    },
+  ];
 
   const handleGradeSubmission = async (submissionId: string) => {
     const draft = gradeDrafts[submissionId];
@@ -1091,7 +1229,7 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold text-gray-900">Learning Materials</h2>
-            <button onClick={() => setShowAddMaterial(true)} className="btn-primary">
+            <button onClick={handleOpenAddMaterial} className="btn-primary">
               <Plus size={20} />
               <span>Add Material</span>
             </button>
@@ -1172,7 +1310,18 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
                                 {material.assignedTo.includes('all') ? 'All Users' : `${material.assignedTo.length} selected`}
                               </p>
                             </div>
-                            <button onClick={() => handleDeleteMaterial(material)} className="p-2 text-gray-400 hover:text-red-600">
+                            <button
+                              onClick={() => handleOpenEditMaterial(material)}
+                              className="p-2 text-gray-400 hover:text-dltt-green"
+                              aria-label={`Edit ${material.title}`}
+                            >
+                              <Edit size={20} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteMaterial(material)}
+                              className="p-2 text-gray-400 hover:text-red-600"
+                              aria-label={`Delete ${material.title}`}
+                            >
                               <Trash2 size={20} />
                             </button>
                           </div>
@@ -1437,61 +1586,13 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
                 <h3 className="text-lg font-bold text-gray-900">Graded submission records</h3>
                 <p className="text-sm text-gray-500">Review uploaded and manually graded records, then delete incorrect entries if needed.</p>
               </div>
-              {gradedSubmissions.length > 0 ? (
-                <div className="overflow-x-auto rounded-lg border border-gray-100">
-                  <table className="min-w-full text-left text-sm text-gray-700">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Teacher</th>
-                        <th className="px-4 py-3 font-semibold">Record</th>
-                        <th className="px-4 py-3 font-semibold">Score</th>
-                        <th className="px-4 py-3 font-semibold">Feedback</th>
-                        <th className="px-4 py-3 font-semibold">Submitted</th>
-                        <th className="px-4 py-3 font-semibold text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {gradedSubmissions.map((submission) => {
-                        const teacher = users.find((user) => user.uid === submission.teacherId);
-                        const submissionLabel = getSubmissionLabel(submission, materials);
-                        const deleteLabel = `${submissionLabel} for ${teacher?.name || 'Unknown User'}`;
-
-                        return (
-                          <tr key={submission.id} className="border-t border-gray-100">
-                            <td className="px-4 py-3">
-                              <div>
-                                <p className="font-semibold text-gray-900">{teacher?.name || 'Unknown User'}</p>
-                                <p className="text-xs text-gray-500">{teacher?.email || submission.teacherId}</p>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">{submissionLabel}</td>
-                            <td className="px-4 py-3 font-bold text-gray-900">
-                              {typeof submission.score === 'number' ? `${submission.score}/100` : '-'}
-                            </td>
-                            <td className="px-4 py-3 max-w-xs truncate">{submission.feedback || '-'}</td>
-                            <td className="px-4 py-3">
-                              {submission.submittedAt ? new Date(submission.submittedAt).toLocaleDateString() : '-'}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteSubmission(submission.id, deleteLabel)}
-                                className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
-                              >
-                                Delete
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="text-center py-10 rounded-lg border border-dashed border-gray-200">
-                  <p className="text-gray-500">No graded submission records yet.</p>
-                </div>
-              )}
+              <DataTable
+                columns={gradedSubmissionColumns}
+                rows={gradedSubmissions}
+                rowKey={(submission) => submission.id}
+                emptyMessage="No graded submission records yet."
+                initialPageSize={10}
+              />
             </div>
           </div>
         </div>
@@ -1789,17 +1890,19 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
             className="bg-white rounded-2xl p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
           >
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">Add Learning Material</h2>
+              <h2 className="text-2xl font-bold text-gray-900">
+                {editingMaterial ? 'Edit Learning Material' : 'Add Learning Material'}
+              </h2>
               <button
                 type="button"
-                aria-label="Close add material form"
-                onClick={() => setShowAddMaterial(false)}
+                aria-label="Close material form"
+                onClick={handleCloseMaterialForm}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <XCircle size={24} />
               </button>
             </div>
-            <form onSubmit={handleAddMaterial} className="space-y-4">
+            <form onSubmit={handleSaveMaterial} className="space-y-4">
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">Title</label>
                 <input
@@ -1931,9 +2034,18 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
                   ))}
                 </div>
               </div>
-              <button type="submit" className="btn-primary w-full mt-4">
-                Create Material
-              </button>
+              <div className="flex space-x-4 mt-6">
+                <button
+                  type="button"
+                  onClick={handleCloseMaterialForm}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-lg font-bold text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary flex-1 justify-center">
+                  {editingMaterial ? 'Update Material' : 'Create Material'}
+                </button>
+              </div>
             </form>
           </motion.div>
         </div>
