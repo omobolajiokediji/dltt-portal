@@ -1053,7 +1053,7 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
       },
     },
   ];
-
+  
   const handleGradeSubmission = async (submissionId: string) => {
     const draft = gradeDrafts[submissionId];
     const score = Number.parseInt(draft?.score || '', 10);
