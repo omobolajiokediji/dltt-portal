@@ -60,6 +60,13 @@ type MaterialFormState = Partial<LearningMaterial> & {
 
 type GradeDraftState = Record<string, { score: string; feedback: string }>;
 
+type GradeEditState = {
+  id: string;
+  score: string;
+  feedback: string;
+  contentUrl: string;
+};
+
 type ImportPreviewStatus = 'ready' | 'missingTeacher' | 'invalidScore' | 'invalidWeek';
 
 type ImportPreviewRow = ImportedScoreRow & {
@@ -127,6 +134,7 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
   const [newMaterial, setNewMaterial] = useState<MaterialFormState>(defaultMaterialState);
   const [newUser, setNewUser] = useState<Partial<UserProfile>>(defaultNewUser);
   const [gradeDrafts, setGradeDrafts] = useState<GradeDraftState>({});
+  const [editingGrade, setEditingGrade] = useState<GradeEditState | null>(null);
   const [gradeImporting, setGradeImporting] = useState(false);
   const [importPreviewRows, setImportPreviewRows] = useState<ImportPreviewRow[]>([]);
   const [importPreviewFileName, setImportPreviewFileName] = useState<string | null>(null);
@@ -892,6 +900,49 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
     });
   };
 
+  const openGradeEditor = (submission: AssignmentSubmission) => {
+    setEditingGrade({
+      id: submission.id,
+      score: typeof submission.score === 'number' ? String(submission.score) : '',
+      feedback: submission.feedback || '',
+      contentUrl: submission.contentUrl || '',
+    });
+  };
+
+  const handleUpdateGradedSubmission = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!editingGrade) {
+      return;
+    }
+
+    const score = Number.parseInt(editingGrade.score, 10);
+    const contentUrl = editingGrade.contentUrl.trim();
+
+    if (Number.isNaN(score) || score < 0 || score > 100) {
+      setNotification({ message: 'Enter a valid score between 0 and 100.', type: 'error' });
+      return;
+    }
+
+    if (!contentUrl) {
+      setNotification({ message: 'Submitted assignment URL is required.', type: 'error' });
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'submissions', editingGrade.id), {
+        score,
+        feedback: editingGrade.feedback.trim(),
+        contentUrl,
+        status: 'graded',
+      });
+      setEditingGrade(null);
+      setNotification({ message: 'Grade updated successfully.', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'submissions');
+    }
+  };
+
   const gradedSubmissionColumns: DataTableColumn<AssignmentSubmission>[] = [
     {
       key: 'teacher',
@@ -936,6 +987,27 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
       render: (submission) => <p className="truncate text-sm text-gray-600">{submission.feedback || '-'}</p>,
     },
     {
+      key: 'submissionUrl',
+      header: 'Submitted Assignment',
+      sortable: true,
+      sortValue: (submission) => submission.contentUrl || '',
+      className: 'max-w-xs',
+      render: (submission) =>
+        submission.contentUrl ? (
+          <a
+            href={submission.contentUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block truncate text-sm font-bold text-dltt-green hover:underline"
+            title={submission.contentUrl}
+          >
+            {submission.contentUrl}
+          </a>
+        ) : (
+          <span className="text-sm text-gray-400">-</span>
+        ),
+    },
+    {
       key: 'submitted',
       header: 'Submitted',
       sortable: true,
@@ -957,13 +1029,26 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
         const deleteLabel = `${submissionLabel} for ${teacher?.name || 'Unknown User'}`;
 
         return (
-          <button
-            type="button"
-            onClick={() => handleDeleteSubmission(submission.id, deleteLabel)}
-            className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
-          >
-            Delete
-          </button>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              aria-label="Edit grade"
+              title="Edit grade"
+              onClick={() => openGradeEditor(submission)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-dltt-green"
+            >
+              <Edit size={18} />
+            </button>
+            <button
+              type="button"
+              aria-label="Delete submission"
+              title="Delete submission"
+              onClick={() => handleDeleteSubmission(submission.id, deleteLabel)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+            >
+              <Trash2 size={18} />
+            </button>
+          </div>
         );
       },
     },
@@ -1595,6 +1680,75 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {editingGrade && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-2xl p-8 max-w-2xl w-full shadow-2xl"
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Edit Grade</h2>
+              <button
+                type="button"
+                aria-label="Close grade editor"
+                onClick={() => setEditingGrade(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateGradedSubmission} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Score</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    max="100"
+                    className="input-field"
+                    value={editingGrade.score}
+                    onChange={(e) => setEditingGrade({ ...editingGrade, score: e.target.value })}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Submitted Assignment URL</label>
+                  <input
+                    required
+                    type="url"
+                    placeholder="https://..."
+                    className="input-field"
+                    value={editingGrade.contentUrl}
+                    onChange={(e) => setEditingGrade({ ...editingGrade, contentUrl: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Feedback</label>
+                <textarea
+                  className="input-field min-h-28"
+                  value={editingGrade.feedback}
+                  onChange={(e) => setEditingGrade({ ...editingGrade, feedback: e.target.value })}
+                />
+              </div>
+              <div className="flex space-x-4 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setEditingGrade(null)}
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-lg font-bold text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary flex-1 justify-center">
+                  Update Grade
+                </button>
+              </div>
+            </form>
+          </motion.div>
         </div>
       )}
 
