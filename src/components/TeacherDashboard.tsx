@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Clock,
   FileText,
+  ImageIcon,
   Pencil,
   Trophy,
   Users,
@@ -26,6 +27,7 @@ import { getTeacherProfileEditingDisabled, subscribeToPortalSettings } from '../
 import { getTeacherProgress, isMaterialAssignedToUser } from '../lib/training';
 import Modal from './Modal';
 import Notification, { NotificationType } from './Notification';
+import TeacherPosterBuilder from './TeacherPosterBuilder';
 
 interface SubmissionModalState {
   isOpen: boolean;
@@ -253,7 +255,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
   const [submissions, setSubmissions] = useState<AssignmentSubmission[]>([]);
   const [portalSettings, setPortalSettings] = useState<PortalSettings>({ teacherProfileEditingDisabled: false });
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'materials' | 'assignments' | 'certificate' | 'profile'>('materials');
+  const [activeTab, setActiveTab] = useState<'materials' | 'assignments' | 'certificate' | 'poster' | 'profile'>('materials');
   const [notification, setNotification] = useState<{ message: string; type: NotificationType } | null>(null);
   const [submissionModal, setSubmissionModal] = useState<SubmissionModalState>({
     isOpen: false,
@@ -516,6 +518,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
           { id: 'materials', label: 'Learning Materials', icon: BookOpen },
           { id: 'assignments', label: 'My Submissions', icon: FileText },
           { id: 'certificate', label: 'Certificate', icon: Award },
+          { id: 'poster', label: 'Social Poster', icon: ImageIcon },
           { id: 'profile', label: 'Profile', icon: Users },
         ].map((tab) => (
           <button
@@ -783,6 +786,8 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
             )}
           </div>
         )}
+
+        {activeTab === 'poster' && <TeacherPosterBuilder user={user} />}
 
         {activeTab === 'profile' && (
           <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 max-w-2xl mx-auto w-full">
