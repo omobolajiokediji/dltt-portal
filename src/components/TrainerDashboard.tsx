@@ -39,19 +39,19 @@ const trainerLevelConfig = {
   trainer: {
     title: 'Trainer',
     capacity: 20,
-    nextTitle: 'Master Trainer',
+    nextTitle: 'Senior Trainer',
     accent: 'from-emerald-500 to-lime-400',
+  },
+  'senior-trainer': {
+    title: 'Senior Trainer',
+    capacity: 50,
+    nextTitle: 'Master Trainer',
+    accent: 'from-amber-500 to-yellow-300',
   },
   'master-trainer': {
     title: 'Master Trainer',
-    capacity: 50,
-    nextTitle: 'Pro Trainer',
-    accent: 'from-amber-500 to-yellow-300',
-  },
-  'pro-trainer': {
-    title: 'Pro Trainer',
     capacity: 100,
-    nextTitle: 'Pro Trainer Elite',
+    nextTitle: 'Master Trainer Elite',
     accent: 'from-rose-500 to-orange-300',
   },
 } as const;
@@ -433,7 +433,7 @@ export default function TrainerDashboard({ user }: { user: UserProfile }) {
             <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm">
               <span className="font-semibold text-dltt-green">{capacityProgress}% of level capacity reached</span>
               <span className="text-gray-500">
-                {user.role === 'pro-trainer'
+                {user.role === 'master-trainer'
                   ? 'Top level: keep building a strong training record.'
                   : `Next path: ${levelConfig.nextTitle} by Admin/SuperAdmin promotion.`}
               </span>

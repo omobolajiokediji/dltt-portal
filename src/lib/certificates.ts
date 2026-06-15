@@ -3,13 +3,13 @@ import signature1 from '../assets/signature1.png?inline';
 import signature2 from '../assets/signature2.png?inline';
 import { GrowthRole, UserProfile } from '../types';
 
-export const certificateLevelOrder: GrowthRole[] = ['teacher', 'trainer', 'master-trainer', 'pro-trainer'];
+export const certificateLevelOrder: GrowthRole[] = ['teacher', 'trainer', 'senior-trainer', 'master-trainer'];
 
 export const certificateLevelLabels: Record<GrowthRole, string> = {
   teacher: 'Teacher',
   trainer: 'Trainer',
+  'senior-trainer': 'Senior Trainer',
   'master-trainer': 'Master Trainer',
-  'pro-trainer': 'Pro Trainer',
 };
 
 const certificateLevelCopy: Record<GrowthRole, { heading: string; lineOne: string; lineTwo: string; lineThree: string }> = {
@@ -21,19 +21,19 @@ const certificateLevelCopy: Record<GrowthRole, { heading: string; lineOne: strin
   },
   trainer: {
     heading: 'Trainer',
-    lineOne: 'has successfully completed the Trainer Level of the',
+    lineOne: 'has successfully completed the Trainer rank of the',
     lineTwo: 'Digital Literacy Training for Teachers (DLTT) Program',
     lineThree: 'and is recognized for mentoring teachers, guiding learning activities, and demonstrated leadership.',
   },
-  'master-trainer': {
-    heading: 'Master Trainer',
-    lineOne: 'has successfully completed the Master Trainer Level of the',
+  'senior-trainer': {
+    heading: 'Senior Trainer',
+    lineOne: 'has successfully completed the Senior Trainer rank of the',
     lineTwo: 'Digital Literacy Training for Teachers (DLTT) Program',
     lineThree: 'and is recognized for advanced facilitation, cohort leadership, and sustained training excellence.',
   },
-  'pro-trainer': {
-    heading: 'Pro Trainer',
-    lineOne: 'has successfully completed the Pro Trainer Level of the',
+  'master-trainer': {
+    heading: 'Master Trainer',
+    lineOne: 'has successfully completed the Master Trainer rank of the',
     lineTwo: 'Digital Literacy Training for Teachers (DLTT) Program',
     lineThree: 'and is recognized for exemplary leadership, scalable impact, and outstanding professional achievement.',
   },

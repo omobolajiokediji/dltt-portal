@@ -277,7 +277,7 @@ export default function App() {
                 user ? (
                   user.role === 'super-admin' || user.role === 'admin' ? (
                     <SuperAdminDashboard allowClearAllRecords={user.role === 'super-admin'} currentUser={user} />
-                  ) : ['trainer', 'master-trainer', 'pro-trainer'].includes(user.role) ? (
+                  ) : ['trainer', 'senior-trainer', 'master-trainer'].includes(user.role) ? (
                     <TrainerDashboard user={user} />
                   ) : (
                     <TeacherDashboard user={user} />

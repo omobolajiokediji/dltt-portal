@@ -12,7 +12,7 @@ service cloud.firestore {
     //   - name: string (required)
     //   - email: string (optional)
     //   - phone: string (optional)
-    //   - role: string (required, enum: super-admin, admin, pro-trainer, master-trainer, trainer, teacher)
+    //   - role: string (required, enum: super-admin, admin, master-trainer, senior-trainer, trainer, teacher)
     //   - state: string (required)
     //   - school: string (optional)
     //   - profilePhoto: string (optional)
@@ -90,7 +90,7 @@ service cloud.firestore {
     function isTrainer() {
       return isAuthenticated() &&
              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['trainer', 'master-trainer', 'pro-trainer'];
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['trainer', 'senior-trainer', 'master-trainer'];
     }
 
     function isManagedTeacher(teacherId) {
@@ -110,7 +110,7 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'name', 'role', 'state']) &&
              data.uid is string &&
              data.name is string && data.name.size() < 100 &&
-             data.role in ['super-admin', 'admin', 'pro-trainer', 'master-trainer', 'trainer', 'teacher'] &&
+             data.role in ['super-admin', 'admin', 'master-trainer', 'senior-trainer', 'trainer', 'teacher'] &&
              data.state is string;
     }
 

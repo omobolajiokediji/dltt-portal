@@ -128,8 +128,8 @@ function getStateGrowthValue(data: StateGrowthStats[], state: string) {
     state,
     teachers: 0,
     trainers: 0,
+    seniorTrainers: 0,
     masterTrainers: 0,
-    proTrainers: 0,
     total: 0,
   };
 }
@@ -145,7 +145,7 @@ function SouthwestGrowthMap({
 }) {
   const maxTotal = Math.max(1, ...data.map((item) => item.total));
   const selected = getStateGrowthValue(data, selectedState || data[0]?.state || 'Oyo State');
-  const leadershipTotal = selected.trainers + selected.masterTrainers + selected.proTrainers;
+  const leadershipTotal = selected.trainers + selected.seniorTrainers + selected.masterTrainers;
 
   return (
     <motion.div
@@ -223,12 +223,12 @@ function SouthwestGrowthMap({
               <p className="text-xl font-bold text-emerald-700">{leadershipTotal}</p>
             </div>
             <div className="rounded-xl bg-amber-50 p-4">
-              <p className="text-gray-500">Master</p>
-              <p className="text-xl font-bold text-amber-700">{selected.masterTrainers}</p>
+              <p className="text-gray-500">Senior</p>
+              <p className="text-xl font-bold text-amber-700">{selected.seniorTrainers}</p>
             </div>
             <div className="rounded-xl bg-rose-50 p-4">
-              <p className="text-gray-500">Pro</p>
-              <p className="text-xl font-bold text-rose-700">{selected.proTrainers}</p>
+              <p className="text-gray-500">Master</p>
+              <p className="text-xl font-bold text-rose-700">{selected.masterTrainers}</p>
             </div>
           </div>
         </div>
@@ -280,8 +280,8 @@ export default function PublicDashboard() {
           state: item.state,
           teachers: item.count,
           trainers: 0,
+          seniorTrainers: 0,
           masterTrainers: 0,
-          proTrainers: 0,
           total: item.count,
         }));
 
@@ -291,8 +291,8 @@ export default function PublicDashboard() {
     { title: 'States Covered', value: stats?.teachersByState?.length || 0, icon: Map, color: 'bg-purple-50 text-purple-600' },
     { title: 'Completion Rate', value: `${stats?.completionRate || 0}%`, icon: CheckCircle, color: 'bg-green-50 text-green-600' },
     { title: 'Trainers', value: stats?.trainerCount || 0, icon: UserCheck, color: 'bg-emerald-50 text-emerald-600' },
-    { title: 'Master Trainers', value: stats?.masterTrainerCount || 0, icon: Medal, color: 'bg-amber-50 text-amber-600' },
-    { title: 'Pro Trainers', value: stats?.proTrainerCount || 0, icon: Sparkles, color: 'bg-rose-50 text-rose-600' },
+    { title: 'Senior Trainers', value: stats?.seniorTrainerCount || 0, icon: Medal, color: 'bg-amber-50 text-amber-600' },
+    { title: 'Master Trainers', value: stats?.masterTrainerCount || 0, icon: Sparkles, color: 'bg-rose-50 text-rose-600' },
   ];
 
   return (

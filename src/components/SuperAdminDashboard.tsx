@@ -120,17 +120,17 @@ const defaultNewUser: Partial<UserProfile> = {
   phone: '',
 };
 
-const growthLevelLabels: Record<'teacher' | 'trainer' | 'master-trainer' | 'pro-trainer', string> = {
+const growthLevelLabels: Record<GrowthRole, string> = {
   teacher: 'Teacher',
   trainer: 'Trainer',
+  'senior-trainer': 'Senior Trainer',
   'master-trainer': 'Master Trainer',
-  'pro-trainer': 'Pro Trainer',
 };
 
 const nextGrowthRole: Partial<Record<UserRole, UserRole>> = {
   teacher: 'trainer',
-  trainer: 'master-trainer',
-  'master-trainer': 'pro-trainer',
+  trainer: 'senior-trainer',
+  'senior-trainer': 'master-trainer',
 };
 
 function getRoleLabel(role: UserRole) {
@@ -146,11 +146,44 @@ function getRoleLabel(role: UserRole) {
 }
 
 function canPromoteRole(role: UserRole) {
-  return role === 'teacher' || role === 'trainer' || role === 'master-trainer';
+  return role === 'teacher' || role === 'trainer' || role === 'senior-trainer';
 }
 
 function isGrowthRole(role: UserRole): role is GrowthRole {
   return certificateLevelOrder.includes(role as GrowthRole);
+}
+
+function getMigratedRankRole(role: string): UserRole | null {
+  if (role === 'pro-trainer') {
+    return 'master-trainer';
+  }
+
+  if (role === 'master-trainer') {
+    return 'senior-trainer';
+  }
+
+  return null;
+}
+
+function getMigratedCertifications(user: UserProfile) {
+  const existing = (user.certifications || {}) as Record<string, unknown>;
+  const migrated: Record<string, unknown> = {};
+
+  Object.entries(existing).forEach(([level, approval]) => {
+    if (level === 'pro-trainer') {
+      migrated['master-trainer'] = migrated['master-trainer'] || approval;
+      return;
+    }
+
+    if (level === 'master-trainer') {
+      migrated['senior-trainer'] = migrated['senior-trainer'] || approval;
+      return;
+    }
+
+    migrated[level] = approval;
+  });
+
+  return migrated;
 }
 
 function getSubmissionLabel(submission: AssignmentSubmission, materials: LearningMaterial[]) {
@@ -243,6 +276,7 @@ export default function SuperAdminDashboard({
     message: '',
     onConfirm: () => {},
   });
+  const [rankRoleMigrationChecked, setRankRoleMigrationChecked] = useState(false);
   const canApproveCertificates = currentUser?.role === 'super-admin' || currentUser?.role === 'admin';
 
   useEffect(() => {
@@ -304,6 +338,68 @@ export default function SuperAdminDashboard({
   }, [loading, users, materials, submissions]);
 
   useEffect(() => {
+    if (
+      loading ||
+      rankRoleMigrationChecked ||
+      portalSettings.rankRoleMigrationCompletedAt ||
+      !currentUser ||
+      (currentUser.role !== 'super-admin' && currentUser.role !== 'admin')
+    ) {
+      if (portalSettings.rankRoleMigrationCompletedAt && !rankRoleMigrationChecked) {
+        setRankRoleMigrationChecked(true);
+      }
+      return;
+    }
+
+    const legacyRankUsers = users
+      .map((user) => ({ user, nextRole: getMigratedRankRole(user.role as string) }))
+      .filter((entry): entry is { user: UserProfile; nextRole: UserRole } => !!entry.nextRole);
+
+    const runMigration = async () => {
+      const batch = writeBatch(db);
+
+      legacyRankUsers.forEach(({ user, nextRole }) => {
+        batch.update(doc(db, 'users', user.uid), {
+          role: nextRole,
+          certifications: getMigratedCertifications(user),
+        });
+      });
+
+      batch.set(
+        doc(db, 'stats', 'global'),
+        {
+          rankRoleMigrationCompletedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+
+      await batch.commit();
+      setRankRoleMigrationChecked(true);
+
+      if (legacyRankUsers.length > 0) {
+        setNotification({
+          message: `Updated ${legacyRankUsers.length} legacy rank record${legacyRankUsers.length === 1 ? '' : 's'} to the new growth path.`,
+          type: 'success',
+        });
+      }
+    };
+
+    runMigration().catch((error) => {
+      console.error('Failed to migrate rank roles:', error);
+      setNotification({
+        message: 'Rank role migration failed. Please confirm the latest Firestore rules are deployed.',
+        type: 'error',
+      });
+    });
+  }, [
+    currentUser,
+    loading,
+    portalSettings.rankRoleMigrationCompletedAt,
+    rankRoleMigrationChecked,
+    users,
+  ]);
+
+  useEffect(() => {
     const candidateIds = new Set(users.filter((user) => canPromoteRole(user.role)).map((user) => user.uid));
     setSelectedPromotionIds((current) => new Set([...current].filter((userId) => candidateIds.has(userId))));
   }, [users]);
@@ -311,7 +407,7 @@ export default function SuperAdminDashboard({
   const teacherProgressMap = useMemo(() => {
     return new Map(
       users
-        .filter((user) => ['teacher', 'trainer', 'master-trainer', 'pro-trainer'].includes(user.role))
+        .filter((user) => ['teacher', 'trainer', 'senior-trainer', 'master-trainer'].includes(user.role))
         .map((teacher) => [teacher.uid, getTeacherProgress(teacher, materials, submissions)]),
     );
   }, [users, materials, submissions]);
@@ -335,8 +431,8 @@ export default function SuperAdminDashboard({
   const teacherCount = users.filter((user) => user.role === 'teacher').length;
   const adminCount = users.filter((user) => user.role === 'admin').length;
   const trainerCount = users.filter((user) => user.role === 'trainer').length;
+  const seniorTrainerCount = users.filter((user) => user.role === 'senior-trainer').length;
   const masterTrainerCount = users.filter((user) => user.role === 'master-trainer').length;
-  const proTrainerCount = users.filter((user) => user.role === 'pro-trainer').length;
   const promotionCandidates = users
     .filter((user) => canPromoteRole(user.role))
     .filter((user) => {
@@ -398,9 +494,9 @@ export default function SuperAdminDashboard({
                   ? 'bg-emerald-100 text-emerald-700'
                   : user.role === 'trainer'
                     ? 'bg-amber-100 text-amber-700'
-                    : user.role === 'master-trainer'
+                    : user.role === 'senior-trainer'
                       ? 'bg-violet-100 text-violet-700'
-                      : user.role === 'pro-trainer'
+                      : user.role === 'master-trainer'
                         ? 'bg-rose-100 text-rose-700'
                         : 'bg-blue-100 text-blue-700'
             }`}
@@ -428,9 +524,9 @@ export default function SuperAdminDashboard({
                 ? 'bg-emerald-50 text-emerald-700'
                 : user.role === 'trainer'
                   ? 'bg-amber-50 text-amber-700'
-                  : user.role === 'master-trainer'
+                  : user.role === 'senior-trainer'
                     ? 'bg-violet-50 text-violet-700'
-                    : user.role === 'pro-trainer'
+                    : user.role === 'master-trainer'
                       ? 'bg-rose-50 text-rose-700'
                       : 'bg-blue-50 text-blue-700'
           }`}
@@ -927,7 +1023,7 @@ export default function SuperAdminDashboard({
               name: name || email.split('@')[0],
               email,
               phone,
-              role: ['teacher', 'trainer', 'master-trainer', 'pro-trainer', 'admin', 'super-admin'].includes(role) ? role : 'teacher',
+              role: ['teacher', 'trainer', 'senior-trainer', 'master-trainer', 'admin', 'super-admin'].includes(role) ? role : 'teacher',
               state: STATES.includes(state) ? state : 'Lagos State',
               approvedForCertificate: false,
               totalScore: 0,
@@ -1780,12 +1876,12 @@ export default function SuperAdminDashboard({
               <p className="text-3xl font-bold text-amber-600">{trainerCount}</p>
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-              <p className="text-sm font-medium text-gray-500">Master Trainers</p>
-              <p className="text-3xl font-bold text-violet-600">{masterTrainerCount}</p>
+              <p className="text-sm font-medium text-gray-500">Senior Trainers</p>
+              <p className="text-3xl font-bold text-violet-600">{seniorTrainerCount}</p>
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-              <p className="text-sm font-medium text-gray-500">Pro Trainers</p>
-              <p className="text-3xl font-bold text-rose-600">{proTrainerCount}</p>
+              <p className="text-sm font-medium text-gray-500">Master Trainers</p>
+              <p className="text-3xl font-bold text-rose-600">{masterTrainerCount}</p>
             </div>
           </div>
 
@@ -2335,8 +2431,8 @@ export default function SuperAdminDashboard({
               <p className="text-3xl font-bold text-amber-600">{trainerCount}</p>
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-              <p className="text-sm font-medium text-gray-500">Master / Pro</p>
-              <p className="text-3xl font-bold text-violet-600">{masterTrainerCount + proTrainerCount}</p>
+              <p className="text-sm font-medium text-gray-500">Senior / Master</p>
+              <p className="text-3xl font-bold text-violet-600">{seniorTrainerCount + masterTrainerCount}</p>
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <p className="text-sm font-medium text-gray-500">Selected</p>
@@ -2349,7 +2445,7 @@ export default function SuperAdminDashboard({
               <div>
                 <h2 className="text-xl font-bold text-gray-900">Growth Path Promotion</h2>
                 <p className="text-sm text-gray-500">
-                  Select one or more eligible users, then advance them one step: Teacher, Trainer, Master Trainer, then Pro Trainer.
+                  Select one or more eligible users, then advance them one step: Teacher, Trainer, Senior Trainer, then Master Trainer.
                 </p>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -2538,8 +2634,8 @@ export default function SuperAdminDashboard({
                 >
                   <option value="teacher">Teacher</option>
                   <option value="trainer">Trainer</option>
+                  <option value="senior-trainer">Senior Trainer</option>
                   <option value="master-trainer">Master Trainer</option>
-                  <option value="pro-trainer">Pro Trainer</option>
                   <option value="admin">Admin</option>
                   <option value="super-admin">Super Admin</option>
                 </select>
@@ -2634,8 +2730,8 @@ export default function SuperAdminDashboard({
                   >
                     <option value="teacher">Teacher</option>
                     <option value="trainer">Trainer</option>
+                    <option value="senior-trainer">Senior Trainer</option>
                     <option value="master-trainer">Master Trainer</option>
-                    <option value="pro-trainer">Pro Trainer</option>
                     <option value="admin">Admin</option>
                     <option value="super-admin">Super Admin</option>
                   </select>

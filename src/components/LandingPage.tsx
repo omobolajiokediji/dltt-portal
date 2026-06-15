@@ -13,14 +13,14 @@ const highlights = [
     accent: 'bg-amber-100 text-amber-700',
   },
   {
-    title: '72 Master Trainers',
+    title: '72 Senior Trainers',
     description: 'Twelve carefully selected ICT teachers from each state form the first cohort of lead trainers.',
     icon: GraduationCap,
     accent: 'bg-emerald-100 text-emerald-700',
   },
   {
     title: 'Train-the-Trainer Model',
-    description: 'Master Trainers cascade the programme in their localities with support from the Foundation.',
+    description: 'Senior Trainers cascade the programme in their localities with support from the Foundation.',
     icon: BookOpen,
     accent: 'bg-sky-100 text-sky-700',
   },
@@ -107,7 +107,7 @@ export default function LandingPage() {
                 <div className="rounded-2xl bg-white/85 border border-white shadow-sm px-5 py-5">
                   <p className="text-xs uppercase tracking-[0.22em] text-slate-400 font-bold">Training Model</p>
                   <p className="mt-2 text-2xl font-black text-slate-950">Cascade</p>
-                  <p className="mt-2 text-sm text-slate-600">Master Trainers scale support into local teaching clusters.</p>
+                  <p className="mt-2 text-sm text-slate-600">Senior Trainers scale support into local teaching clusters.</p>
                 </div>
                 <div className="rounded-2xl bg-white/85 border border-white shadow-sm px-5 py-5">
                   <p className="text-xs uppercase tracking-[0.22em] text-slate-400 font-bold">Implementation</p>
@@ -146,11 +146,11 @@ export default function LandingPage() {
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="rounded-2xl bg-slate-50 border border-slate-100 p-5">
                       <p className="text-sm font-bold text-slate-950">Phase 1</p>
-                      <p className="mt-1 text-slate-600">Train 72 Master Trainers, with 12 ICT teachers selected from each of the six states.</p>
+                      <p className="mt-1 text-slate-600">Train 72 Senior Trainers, with 12 ICT teachers selected from each of the six states.</p>
                     </div>
                     <div className="rounded-2xl bg-slate-50 border border-slate-100 p-5">
                       <p className="text-sm font-bold text-slate-950">Phase 2</p>
-                      <p className="mt-1 text-slate-600">Each Master Trainer cascades the training to 20 to 30 teachers in their localities.</p>
+                      <p className="mt-1 text-slate-600">Each Senior Trainer cascades the training to 20 to 30 teachers in their localities.</p>
                     </div>
                     <div className="rounded-2xl bg-slate-50 border border-slate-100 p-5">
                       <p className="text-sm font-bold text-slate-950">Phase 3</p>

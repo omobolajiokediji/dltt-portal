@@ -7,8 +7,8 @@ type UserLike = Pick<UserProfile, 'uid' | 'state'>;
 const GROWTH_LEVELS: { role: GrowthRole; title: string }[] = [
   { role: 'teacher', title: 'Teachers' },
   { role: 'trainer', title: 'Trainers' },
+  { role: 'senior-trainer', title: 'Senior Trainers' },
   { role: 'master-trainer', title: 'Master Trainers' },
-  { role: 'pro-trainer', title: 'Pro Trainers' },
 ];
 
 export interface TeacherProgress {
@@ -128,8 +128,8 @@ export function buildTrainingStats(
 ): TrainingStats {
   const teachers = users.filter((user) => user.role === 'teacher');
   const trainerCount = users.filter((user) => user.role === 'trainer').length;
+  const seniorTrainerCount = users.filter((user) => user.role === 'senior-trainer').length;
   const masterTrainerCount = users.filter((user) => user.role === 'master-trainer').length;
-  const proTrainerCount = users.filter((user) => user.role === 'pro-trainer').length;
   const teacherProgress = teachers.map((teacher) => {
     const progress = getTeacherProgress(teacher, materials, submissions);
     return {
@@ -221,24 +221,24 @@ export function buildTrainingStats(
     const stateUsers = users.filter((user) => user.state === state);
     const teachers = stateUsers.filter((user) => user.role === 'teacher').length;
     const trainers = stateUsers.filter((user) => user.role === 'trainer').length;
+    const seniorTrainers = stateUsers.filter((user) => user.role === 'senior-trainer').length;
     const masterTrainers = stateUsers.filter((user) => user.role === 'master-trainer').length;
-    const proTrainers = stateUsers.filter((user) => user.role === 'pro-trainer').length;
 
     return {
       state,
       teachers,
       trainers,
+      seniorTrainers,
       masterTrainers,
-      proTrainers,
-      total: teachers + trainers + masterTrainers + proTrainers,
+      total: teachers + trainers + seniorTrainers + masterTrainers,
     };
   }).sort((a, b) => b.total - a.total || a.state.localeCompare(b.state));
 
   return {
     enrollment,
     trainerCount,
+    seniorTrainerCount,
     masterTrainerCount,
-    proTrainerCount,
     completionRate,
     activeTeachers,
     genderDistribution,
@@ -271,7 +271,7 @@ export async function syncTrainingDerivedData(
   submissions: AssignmentSubmission[],
 ) {
   const teachers = users.filter((user) =>
-    ['teacher', 'trainer', 'master-trainer', 'pro-trainer'].includes(user.role),
+    ['teacher', 'trainer', 'senior-trainer', 'master-trainer'].includes(user.role),
   );
   const batch = writeBatch(db);
 

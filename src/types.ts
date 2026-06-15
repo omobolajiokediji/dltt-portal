@@ -1,5 +1,5 @@
-export type UserRole = 'super-admin' | 'admin' | 'pro-trainer' | 'master-trainer' | 'trainer' | 'teacher';
-export type GrowthRole = 'teacher' | 'trainer' | 'master-trainer' | 'pro-trainer';
+export type UserRole = 'super-admin' | 'admin' | 'master-trainer' | 'senior-trainer' | 'trainer' | 'teacher';
+export type GrowthRole = 'teacher' | 'trainer' | 'senior-trainer' | 'master-trainer';
 
 export interface CertificationApproval {
   approved: boolean;
@@ -35,6 +35,7 @@ export interface UserProfile {
 
 export interface PortalSettings {
   teacherProfileEditingDisabled?: boolean;
+  rankRoleMigrationCompletedAt?: string;
 }
 
 export interface LearningMaterial {
@@ -92,16 +93,16 @@ export interface StateGrowthStats {
   state: string;
   teachers: number;
   trainers: number;
+  seniorTrainers: number;
   masterTrainers: number;
-  proTrainers: number;
   total: number;
 }
 
 export interface TrainingStats {
   enrollment: number;
   trainerCount: number;
+  seniorTrainerCount: number;
   masterTrainerCount: number;
-  proTrainerCount: number;
   completionRate: number;
   activeTeachers: number;
   genderDistribution: GenderDistributionItem[];
