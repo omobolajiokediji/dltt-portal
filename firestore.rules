@@ -12,7 +12,7 @@ service cloud.firestore {
     //   - name: string (required)
     //   - email: string (optional)
     //   - phone: string (optional)
-    //   - role: string (required, enum: super-admin, admin, teacher)
+    //   - role: string (required, enum: super-admin, admin, pro-trainer, master-trainer, trainer, teacher)
     //   - state: string (required)
     //   - school: string (optional)
     //   - profilePhoto: string (optional)
@@ -21,6 +21,8 @@ service cloud.firestore {
     //   - totalScore: number (optional)
     //   - attendance: map (optional)
     //   - assignmentCompletion: map (optional)
+    //   - trainerId: string (optional; set on teachers managed by trainers)
+    //   - createdBy: string (optional)
     //
     // Collection: materials
     // Document ID: materialId
@@ -85,12 +87,72 @@ service cloud.firestore {
       return isAuthenticated() && (request.auth.token.email == "omobolajiokediji@gmail.com" || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super-admin'));
     }
 
+    function isTrainer() {
+      return isAuthenticated() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['trainer', 'master-trainer', 'pro-trainer'];
+    }
+
+    function isManagedTeacher(teacherId) {
+      return isTrainer() &&
+             exists(/databases/$(database)/documents/users/$(teacherId)) &&
+             get(/databases/$(database)/documents/users/$(teacherId)).data.role == 'teacher' &&
+             get(/databases/$(database)/documents/users/$(teacherId)).data.trainerId == request.auth.uid;
+    }
+
+    function canReadManagedTeacher(data) {
+      return isTrainer() &&
+             data.role == 'teacher' &&
+             data.trainerId == request.auth.uid;
+    }
+
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'name', 'role', 'state']) &&
              data.uid is string &&
              data.name is string && data.name.size() < 100 &&
-             data.role in ['super-admin', 'admin', 'teacher'] &&
+             data.role in ['super-admin', 'admin', 'pro-trainer', 'master-trainer', 'trainer', 'teacher'] &&
              data.state is string;
+    }
+
+    function isTrainerCreatedTeacher(userId) {
+      return isTrainer() &&
+             request.resource.data.uid == userId &&
+             request.resource.data.role == 'teacher' &&
+             request.resource.data.trainerId == request.auth.uid &&
+             request.resource.data.createdBy == request.auth.uid &&
+             isValidUser(request.resource.data);
+    }
+
+    function trainerCanUpdateManagedTeacher(userId) {
+      return isManagedTeacher(userId) &&
+             request.resource.data.uid == resource.data.uid &&
+             request.resource.data.role == 'teacher' &&
+             request.resource.data.trainerId == request.auth.uid &&
+             isValidUser(request.resource.data) &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'name',
+               'email',
+               'phone',
+               'state',
+               'school',
+               'gender',
+               'attendance',
+               'assignmentCompletion',
+               'totalScore',
+               'lastLoginAt',
+               'accountNumber',
+               'bank',
+               'accountName',
+               'certificateName'
+             ]);
+    }
+
+    function certificateApprovalChangeAllowed() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+               'approvedForCertificate',
+               'certifications'
+             ]) ||
+             isAdmin();
     }
 
     function isValidMaterial(data) {
@@ -99,6 +161,17 @@ service cloud.firestore {
              data.type in ['slide', 'pdf', 'assignment', 'video', 'audio'] &&
              data.contentUrl is string &&
              data.week is number;
+    }
+
+    function isValidTrainerMaterial(data) {
+      return isTrainer() &&
+             isValidMaterial(data) &&
+             data.type == 'assignment' &&
+             data.createdBy == request.auth.uid &&
+             data.assignedTo is list &&
+             !data.assignedTo.hasAny(['all']) &&
+             data.assignedStates is list &&
+             data.assignedStates.size() == 0;
     }
 
     function isValidSubmission(data) {
@@ -152,9 +225,14 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if (isAdmin() || isSuperAdmin()) && isValidUser(request.resource.data);
-      allow update: if (isAdmin() || isSuperAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role)) && isValidUser(request.resource.data);
+      allow read: if isAuthenticated() &&
+                    (isOwner(userId) || isAdmin() || canReadManagedTeacher(resource.data));
+      allow create: if ((isAdmin() || isSuperAdmin()) && isValidUser(request.resource.data)) ||
+                       isTrainerCreatedTeacher(userId);
+      allow update: if ((isAdmin() || isSuperAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role)) &&
+                        isValidUser(request.resource.data) &&
+                        certificateApprovalChangeAllowed()) ||
+                       trainerCanUpdateManagedTeacher(userId);
       allow delete: if isAdmin() || isSuperAdmin();
     }
 
@@ -165,14 +243,18 @@ service cloud.firestore {
 
     match /materials/{materialId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isSuperAdmin();
+      allow create: if isAdmin() || isSuperAdmin() || isValidTrainerMaterial(request.resource.data);
+      allow update: if isAdmin() || isSuperAdmin() ||
+                    (isTrainer() && resource.data.createdBy == request.auth.uid && isValidTrainerMaterial(request.resource.data));
+      allow delete: if isAdmin() || isSuperAdmin() ||
+                    (isTrainer() && resource.data.createdBy == request.auth.uid);
     }
 
     match /submissions/{submissionId} {
-      allow read: if isAuthenticated() && (isOwner(resource.data.teacherId) || isAdmin() || isSuperAdmin());
+      allow read: if isAuthenticated() && (isOwner(resource.data.teacherId) || isAdmin() || isSuperAdmin() || isManagedTeacher(resource.data.teacherId));
       allow create: if ((isAdmin() || isSuperAdmin()) && isValidAdminSubmission(request.resource.data)) ||
                     (isAuthenticated() && isValidSubmission(request.resource.data));
-      allow update: if (isAdmin() || isSuperAdmin()) && adminCanUpdateSubmission();
+      allow update: if ((isAdmin() || isSuperAdmin()) || (isTrainer() && isManagedTeacher(resource.data.teacherId))) && adminCanUpdateSubmission();
       allow delete: if isAdmin() || isSuperAdmin();
     }
 

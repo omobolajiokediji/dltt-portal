@@ -1,8 +1,15 @@
 import { Firestore, collection, doc, writeBatch } from 'firebase/firestore';
 import { STATES, WEEKS } from '../constants';
-import { AssignmentSubmission, LearningMaterial, TrainingStats, UserProfile } from '../types';
+import { AssignmentSubmission, GrowthRole, LearningMaterial, TrainingStats, UserProfile } from '../types';
 
 type UserLike = Pick<UserProfile, 'uid' | 'state'>;
+
+const GROWTH_LEVELS: { role: GrowthRole; title: string }[] = [
+  { role: 'teacher', title: 'Teachers' },
+  { role: 'trainer', title: 'Trainers' },
+  { role: 'master-trainer', title: 'Master Trainers' },
+  { role: 'pro-trainer', title: 'Pro Trainers' },
+];
 
 export interface TeacherProgress {
   totalAssignments: number;
@@ -120,6 +127,9 @@ export function buildTrainingStats(
   submissions: AssignmentSubmission[],
 ): TrainingStats {
   const teachers = users.filter((user) => user.role === 'teacher');
+  const trainerCount = users.filter((user) => user.role === 'trainer').length;
+  const masterTrainerCount = users.filter((user) => user.role === 'master-trainer').length;
+  const proTrainerCount = users.filter((user) => user.role === 'pro-trainer').length;
   const teacherProgress = teachers.map((teacher) => {
     const progress = getTeacherProgress(teacher, materials, submissions);
     return {
@@ -150,6 +160,25 @@ export function buildTrainingStats(
     }))
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .slice(0, 20);
+
+  const levelLeaderboards = GROWTH_LEVELS.map((level) => {
+    const levelUsers = users.filter((user) => user.role === level.role);
+    return {
+      ...level,
+      count: levelUsers.length,
+      performers: levelUsers
+        .map((levelUser) => {
+          const progress = getTeacherProgress(levelUser, materials, submissions);
+          return {
+            name: levelUser.name,
+            score: progress.totalScore,
+            state: levelUser.state,
+          };
+        })
+        .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+        .slice(0, 5),
+    };
+  }).filter((level) => level.count > 0);
 
   const stateLeaderboard = STATES.map((state) => {
     const stateTeachers = teacherProgress.filter((entry) => entry.teacher.state === state);
@@ -188,14 +217,36 @@ export function buildTrainingStats(
     .filter((item) => item.count > 0)
     .sort((a, b) => b.count - a.count || a.state.localeCompare(b.state));
 
+  const growthByState = STATES.map((state) => {
+    const stateUsers = users.filter((user) => user.state === state);
+    const teachers = stateUsers.filter((user) => user.role === 'teacher').length;
+    const trainers = stateUsers.filter((user) => user.role === 'trainer').length;
+    const masterTrainers = stateUsers.filter((user) => user.role === 'master-trainer').length;
+    const proTrainers = stateUsers.filter((user) => user.role === 'pro-trainer').length;
+
+    return {
+      state,
+      teachers,
+      trainers,
+      masterTrainers,
+      proTrainers,
+      total: teachers + trainers + masterTrainers + proTrainers,
+    };
+  }).sort((a, b) => b.total - a.total || a.state.localeCompare(b.state));
+
   return {
     enrollment,
+    trainerCount,
+    masterTrainerCount,
+    proTrainerCount,
     completionRate,
     activeTeachers,
     genderDistribution,
     teacherLeaderboard,
+    levelLeaderboards,
     stateLeaderboard,
     teachersByState,
+    growthByState,
   };
 }
 
@@ -219,7 +270,9 @@ export async function syncTrainingDerivedData(
   materials: LearningMaterial[],
   submissions: AssignmentSubmission[],
 ) {
-  const teachers = users.filter((user) => user.role === 'teacher');
+  const teachers = users.filter((user) =>
+    ['teacher', 'trainer', 'master-trainer', 'pro-trainer'].includes(user.role),
+  );
   const batch = writeBatch(db);
 
   for (const teacher of teachers) {

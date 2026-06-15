@@ -19,7 +19,9 @@ import {
   BookOpen,
   CheckCircle,
   ChevronDown,
+  Download,
   Edit,
+  ExternalLink,
   FileSpreadsheet,
   FileText,
   Mail,
@@ -38,8 +40,14 @@ import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { auth, secondaryAuth, db } from '../lib/firebase';
 import { STATES, WEEKS } from '../constants';
-import { AssignmentSubmission, ImportedScoreRow, LearningMaterial, PortalSettings, UserProfile, UserRole } from '../types';
+import { AssignmentSubmission, GrowthRole, ImportedScoreRow, LearningMaterial, PortalSettings, UserProfile, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
+import {
+  certificateLevelLabels,
+  certificateLevelOrder,
+  getCertificateLevelsForUser,
+  isCertificationApproved,
+} from '../lib/certificates';
 import { getMaterialCreatedAtTime, sortMaterialsByNewest } from '../lib/materials';
 import {
   getTeacherProfileEditingDisabled,
@@ -79,6 +87,14 @@ type ImportPreviewRow = ImportedScoreRow & {
   reason?: string;
 };
 
+type GradingRecordType = 'all' | 'assignment' | 'assessment';
+
+type GradingLibraryFilters = {
+  week: string;
+  state: string;
+  type: GradingRecordType;
+};
+
 const defaultMaterialState: MaterialFormState = {
   type: 'slide',
   week: 1,
@@ -104,6 +120,39 @@ const defaultNewUser: Partial<UserProfile> = {
   phone: '',
 };
 
+const growthLevelLabels: Record<'teacher' | 'trainer' | 'master-trainer' | 'pro-trainer', string> = {
+  teacher: 'Teacher',
+  trainer: 'Trainer',
+  'master-trainer': 'Master Trainer',
+  'pro-trainer': 'Pro Trainer',
+};
+
+const nextGrowthRole: Partial<Record<UserRole, UserRole>> = {
+  teacher: 'trainer',
+  trainer: 'master-trainer',
+  'master-trainer': 'pro-trainer',
+};
+
+function getRoleLabel(role: UserRole) {
+  if (role === 'super-admin') {
+    return 'Super Admin';
+  }
+
+  if (role === 'admin') {
+    return 'Admin';
+  }
+
+  return growthLevelLabels[role];
+}
+
+function canPromoteRole(role: UserRole) {
+  return role === 'teacher' || role === 'trainer' || role === 'master-trainer';
+}
+
+function isGrowthRole(role: UserRole): role is GrowthRole {
+  return certificateLevelOrder.includes(role as GrowthRole);
+}
+
 function getSubmissionLabel(submission: AssignmentSubmission, materials: LearningMaterial[]) {
   const material = materials.find((item) => item.id === submission.materialId);
   if (material) {
@@ -118,14 +167,43 @@ function getSubmissionLabel(submission: AssignmentSubmission, materials: Learnin
   return 'Unknown Submission';
 }
 
-export default function SuperAdminDashboard({ allowClearAllRecords = true }: { allowClearAllRecords?: boolean }) {
+function getSubmissionWeek(submission: AssignmentSubmission, materials: LearningMaterial[]) {
+  const material = materials.find((item) => item.id === submission.materialId);
+  if (material?.week) {
+    return material.week;
+  }
+
+  const weeklyTestScoreMatch = submission.materialId.match(/^test-assessment-week-(\d+)$/);
+  if (weeklyTestScoreMatch) {
+    return Number.parseInt(weeklyTestScoreMatch[1], 10);
+  }
+
+  return undefined;
+}
+
+function getSubmissionType(submission: AssignmentSubmission, materials: LearningMaterial[]): Exclude<GradingRecordType, 'all'> {
+  const material = materials.find((item) => item.id === submission.materialId);
+  return material?.type === 'assignment' ? 'assignment' : 'assessment';
+}
+
+function isDownloadableSubmissionUrl(url: string | undefined) {
+  return !!url && /^https?:\/\//i.test(url);
+}
+
+export default function SuperAdminDashboard({
+  allowClearAllRecords = true,
+  currentUser,
+}: {
+  allowClearAllRecords?: boolean;
+  currentUser?: UserProfile;
+}) {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [materials, setMaterials] = useState<LearningMaterial[]>([]);
   const [submissions, setSubmissions] = useState<AssignmentSubmission[]>([]);
   const [portalSettings, setPortalSettings] = useState<PortalSettings>({ teacherProfileEditingDisabled: false });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'users' | 'materials' | 'grading'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'materials' | 'grading' | 'promotion'>('users');
   const [showAddUser, setShowAddUser] = useState(false);
   const [showEditUser, setShowEditUser] = useState<UserProfile | null>(null);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
@@ -134,6 +212,9 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
   const [newMaterial, setNewMaterial] = useState<MaterialFormState>(defaultMaterialState);
   const [newUser, setNewUser] = useState<Partial<UserProfile>>(defaultNewUser);
   const [gradeDrafts, setGradeDrafts] = useState<GradeDraftState>({});
+  const [promotionSearchTerm, setPromotionSearchTerm] = useState('');
+  const [selectedPromotionIds, setSelectedPromotionIds] = useState<Set<string>>(new Set());
+  const [promotingUserIds, setPromotingUserIds] = useState<Set<string>>(new Set());
   const [editingGrade, setEditingGrade] = useState<GradeEditState | null>(null);
   const [gradeImporting, setGradeImporting] = useState(false);
   const [importPreviewRows, setImportPreviewRows] = useState<ImportPreviewRow[]>([]);
@@ -143,6 +224,11 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
     teacherId: '',
     week: '',
     score: '',
+  });
+  const [gradingLibraryFilters, setGradingLibraryFilters] = useState<GradingLibraryFilters>({
+    week: '',
+    state: '',
+    type: 'all',
   });
   const [notification, setNotification] = useState<{ message: string; type: NotificationType } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -157,6 +243,7 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
     message: '',
     onConfirm: () => {},
   });
+  const canApproveCertificates = currentUser?.role === 'super-admin' || currentUser?.role === 'admin';
 
   useEffect(() => {
     const unsubUsers = onSnapshot(
@@ -216,10 +303,15 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
     });
   }, [loading, users, materials, submissions]);
 
+  useEffect(() => {
+    const candidateIds = new Set(users.filter((user) => canPromoteRole(user.role)).map((user) => user.uid));
+    setSelectedPromotionIds((current) => new Set([...current].filter((userId) => candidateIds.has(userId))));
+  }, [users]);
+
   const teacherProgressMap = useMemo(() => {
     return new Map(
       users
-        .filter((user) => user.role === 'teacher')
+        .filter((user) => ['teacher', 'trainer', 'master-trainer', 'pro-trainer'].includes(user.role))
         .map((teacher) => [teacher.uid, getTeacherProgress(teacher, materials, submissions)]),
     );
   }, [users, materials, submissions]);
@@ -242,6 +334,21 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
 
   const teacherCount = users.filter((user) => user.role === 'teacher').length;
   const adminCount = users.filter((user) => user.role === 'admin').length;
+  const trainerCount = users.filter((user) => user.role === 'trainer').length;
+  const masterTrainerCount = users.filter((user) => user.role === 'master-trainer').length;
+  const proTrainerCount = users.filter((user) => user.role === 'pro-trainer').length;
+  const promotionCandidates = users
+    .filter((user) => canPromoteRole(user.role))
+    .filter((user) => {
+      const searchValue = promotionSearchTerm.toLowerCase();
+      return (
+        user.name.toLowerCase().includes(searchValue) ||
+        user.email.toLowerCase().includes(searchValue) ||
+        user.state.toLowerCase().includes(searchValue) ||
+        getRoleLabel(user.role).toLowerCase().includes(searchValue) ||
+        (user.phone || '').includes(promotionSearchTerm)
+      );
+    });
   const isTeacherProfileEditingDisabled = getTeacherProfileEditingDisabled(portalSettings);
   const materialWeekGroups = useMemo(() => {
     const groups = new Map<number, LearningMaterial[]>();
@@ -289,7 +396,13 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
                 ? 'bg-indigo-100 text-indigo-700'
                 : user.role === 'admin'
                   ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-blue-100 text-blue-700'
+                  : user.role === 'trainer'
+                    ? 'bg-amber-100 text-amber-700'
+                    : user.role === 'master-trainer'
+                      ? 'bg-violet-100 text-violet-700'
+                      : user.role === 'pro-trainer'
+                        ? 'bg-rose-100 text-rose-700'
+                        : 'bg-blue-100 text-blue-700'
             }`}
           >
             {user.name.charAt(0)}
@@ -313,11 +426,17 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
               ? 'bg-indigo-50 text-indigo-700'
               : user.role === 'admin'
                 ? 'bg-emerald-50 text-emerald-700'
-                : 'bg-blue-50 text-blue-700'
+                : user.role === 'trainer'
+                  ? 'bg-amber-50 text-amber-700'
+                  : user.role === 'master-trainer'
+                    ? 'bg-violet-50 text-violet-700'
+                    : user.role === 'pro-trainer'
+                      ? 'bg-rose-50 text-rose-700'
+                      : 'bg-blue-50 text-blue-700'
           }`}
         >
           <Shield size={12} className="mr-1" />
-          {user.role}
+          {getRoleLabel(user.role)}
         </span>
       ),
     },
@@ -355,9 +474,9 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
       key: 'progress',
       header: 'Progress',
       sortable: true,
-      sortValue: (user) => (user.role === 'teacher' ? (teacherProgressMap.get(user.uid)?.totalScore ?? 0) : -1),
+      sortValue: (user) => (teacherProgressMap.get(user.uid)?.totalScore ?? -1),
       render: (user) => {
-        const progress = user.role === 'teacher' ? teacherProgressMap.get(user.uid) : null;
+        const progress = teacherProgressMap.get(user.uid);
         return (
           <span className="text-sm text-gray-600">
             {progress
@@ -369,26 +488,42 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
     },
     {
       key: 'certificate',
-      header: 'Certificate',
+      header: 'Certifications',
       sortable: true,
-      sortValue: (user) => (user.role === 'teacher' && user.approvedForCertificate ? 1 : 0),
-      headerClassName: 'text-center',
-      className: 'text-center',
-      render: (user) =>
-        user.role === 'teacher' ? (
-          <button
-            onClick={() => handleApproveCertificate(user.uid, !user.approvedForCertificate)}
-            className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-              user.approvedForCertificate
-                ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            {user.approvedForCertificate ? 'Approved' : 'Approve'}
-          </button>
-        ) : (
-          <span className="text-xs text-gray-400">N/A</span>
-        ),
+      sortValue: (user) =>
+        isGrowthRole(user.role)
+          ? getCertificateLevelsForUser(user).filter((level) => isCertificationApproved(user, level)).length
+          : -1,
+      render: (user) => {
+        if (!isGrowthRole(user.role)) {
+          return <span className="text-xs text-gray-400">N/A</span>;
+        }
+
+        return (
+          <div className="flex flex-wrap gap-2">
+            {getCertificateLevelsForUser(user).map((level) => {
+              const approved = isCertificationApproved(user, level);
+
+              return (
+                <button
+                  key={level}
+                  type="button"
+                  disabled={!canApproveCertificates}
+                  onClick={() => handleApproveCertificate(user, level, !approved)}
+                  className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    approved
+                      ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  } ${canApproveCertificates ? '' : 'cursor-not-allowed opacity-75'}`}
+                  title={canApproveCertificates ? undefined : 'Only Admins can approve certificates'}
+                >
+                  {certificateLevelLabels[level]}: {approved ? 'Approved' : 'Approve'}
+                </button>
+              );
+            })}
+          </div>
+        );
+      },
     },
     {
       key: 'actions',
@@ -411,6 +546,124 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
           </button>
         </div>
       ),
+    },
+  ];
+
+  const promotionColumns: DataTableColumn<UserProfile>[] = [
+    {
+      key: 'select',
+      header: 'Select',
+      headerClassName: 'w-24',
+      render: (teacher) => (
+        <input
+          type="checkbox"
+          aria-label={`Select ${teacher.name}`}
+          checked={selectedPromotionIds.has(teacher.uid)}
+          onChange={(e) =>
+            setSelectedPromotionIds((current) => {
+              const next = new Set(current);
+              if (e.target.checked) {
+                next.add(teacher.uid);
+              } else {
+                next.delete(teacher.uid);
+              }
+              return next;
+            })
+          }
+          className="h-4 w-4 rounded border-gray-300 text-dltt-green focus:ring-dltt-green"
+        />
+      ),
+    },
+    {
+      key: 'user',
+      header: 'User',
+      sortable: true,
+      sortValue: (selectedUser) => selectedUser.name,
+      render: (selectedUser) => (
+        <div>
+          <p className="font-bold text-gray-900">{selectedUser.name}</p>
+          <p className="text-xs text-gray-500">{selectedUser.email || 'No email'}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'level',
+      header: 'Level',
+      sortable: true,
+      sortValue: (selectedUser) => getRoleLabel(selectedUser.role),
+      render: (selectedUser) => (
+        <span className="inline-flex items-center rounded-lg bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-700">
+          {getRoleLabel(selectedUser.role)}
+        </span>
+      ),
+    },
+    {
+      key: 'nextLevel',
+      header: 'Next Level',
+      sortable: true,
+      sortValue: (selectedUser) => getRoleLabel(nextGrowthRole[selectedUser.role] || selectedUser.role),
+      render: (selectedUser) => {
+        const nextRole = nextGrowthRole[selectedUser.role];
+        return <span className="text-sm font-semibold text-dltt-green">{nextRole ? getRoleLabel(nextRole) : 'Top Level'}</span>;
+      },
+    },
+    {
+      key: 'state',
+      header: 'State',
+      sortable: true,
+      sortValue: (teacher) => teacher.state,
+      render: (teacher) => (
+        <div className="flex items-center text-sm text-gray-600">
+          <MapPin size={14} className="mr-1.5 text-gray-400" />
+          {teacher.state}
+        </div>
+      ),
+    },
+    {
+      key: 'progress',
+      header: 'Progress',
+      sortable: true,
+      sortValue: (selectedUser) => teacherProgressMap.get(selectedUser.uid)?.totalScore ?? 0,
+      render: (selectedUser) => {
+        const progress = teacherProgressMap.get(selectedUser.uid);
+        return (
+          <span className="text-sm text-gray-600">
+            {progress
+              ? `${progress.totalScore} pts / ${progress.completedWeeklyTests} tests / ${progress.attendanceCount} attendance weeks`
+              : 'No activity yet'}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'trainer',
+      header: 'Current Trainer',
+      sortable: true,
+      sortValue: (selectedUser) => selectedUser.trainerId || '',
+      render: (selectedUser) => {
+        const trainer = users.find((user) => user.uid === selectedUser.trainerId);
+        return <span className="text-sm text-gray-600">{trainer?.name || 'Unassigned'}</span>;
+      },
+    },
+    {
+      key: 'action',
+      header: 'Promote',
+      headerClassName: 'text-right',
+      className: 'text-right',
+      render: (selectedUser) => {
+        const isPromoting = promotingUserIds.has(selectedUser.uid);
+
+        return (
+          <button
+            type="button"
+            onClick={() => handlePromoteUser(selectedUser)}
+            disabled={isPromoting}
+            className="inline-flex min-w-24 items-center justify-center rounded-lg bg-dltt-green px-3 py-2 text-xs font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            {isPromoting ? 'Promoting...' : 'Promote'}
+          </button>
+        );
+      },
     },
   ];
 
@@ -493,18 +746,113 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
     }
   };
 
-  const handleApproveCertificate = async (teacherId: string, approved: boolean) => {
+  const handleApproveCertificate = async (targetUser: UserProfile, level: GrowthRole, approved: boolean) => {
+    if (!canApproveCertificates || !currentUser) {
+      setNotification({ message: 'Only Admins can approve certificates.', type: 'error' });
+      return;
+    }
+
+    const certifications = {
+      ...(targetUser.certifications || {}),
+      [level]: approved
+        ? {
+            approved: true,
+            approvedAt: new Date().toISOString(),
+            approvedBy: currentUser.uid,
+          }
+        : {
+            approved: false,
+          },
+    };
+
     try {
-      await updateDoc(doc(db, 'users', teacherId), {
-        approvedForCertificate: approved,
+      await updateDoc(doc(db, 'users', targetUser.uid), {
+        certifications,
+        ...(level === 'teacher' ? { approvedForCertificate: approved } : {}),
       });
       setNotification({
-        message: approved ? 'Certificate approved.' : 'Certificate approval removed.',
+        message: approved
+          ? `${certificateLevelLabels[level]} certificate approved.`
+          : `${certificateLevelLabels[level]} certificate approval removed.`,
         type: 'success',
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'users');
     }
+  };
+
+  const promoteUsersToNextLevel = async (userIds: string[]) => {
+    const promotableUsers = users.filter((user) => userIds.includes(user.uid) && canPromoteRole(user.role));
+
+    if (promotableUsers.length === 0) {
+      setNotification({ message: 'Select at least one eligible user to promote.', type: 'error' });
+      return;
+    }
+
+    const promotableIds = promotableUsers.map((user) => user.uid);
+
+    try {
+      setPromotingUserIds((current) => new Set([...current, ...promotableIds]));
+      const promotedAt = new Date().toISOString();
+      const batch = writeBatch(db);
+
+      promotableUsers.forEach((selectedUser) => {
+        const nextRole = nextGrowthRole[selectedUser.role];
+        if (!nextRole) {
+          return;
+        }
+
+        batch.update(doc(db, 'users', selectedUser.uid), {
+          role: nextRole,
+          promotedAt,
+          trainerId: deleteField(),
+        });
+      });
+
+      await batch.commit();
+      setSelectedPromotionIds(new Set());
+      setNotification({
+        message: `${promotableUsers.length} user${promotableUsers.length === 1 ? '' : 's'} promoted to the next level.`,
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Promotion failed:', error);
+      setNotification({
+        message: 'Promotion failed. Please check that the latest Firestore rules are deployed, then try again.',
+        type: 'error',
+      });
+    } finally {
+      setPromotingUserIds((current) => {
+        const next = new Set(current);
+        promotableIds.forEach((userId) => next.delete(userId));
+        return next;
+      });
+    }
+  };
+
+  const handlePromoteUser = async (selectedUser: UserProfile) => {
+    const nextRole = nextGrowthRole[selectedUser.role];
+    if (!nextRole) {
+      setNotification({ message: `${selectedUser.name} is already at the highest growth level.`, type: 'error' });
+      return;
+    }
+
+    await promoteUsersToNextLevel([selectedUser.uid]);
+  };
+
+  const handleBulkPromoteUsers = () => {
+    const userIds = [...selectedPromotionIds];
+    if (userIds.length === 0) {
+      setNotification({ message: 'Select at least one eligible user to promote.', type: 'error' });
+      return;
+    }
+
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Promote Selected Users',
+      message: `Promote ${userIds.length} selected user${userIds.length === 1 ? '' : 's'} to their next growth level?`,
+      onConfirm: () => promoteUsersToNextLevel(userIds),
+    });
   };
 
   const handleTeacherProfileEditingToggle = async (disabled: boolean) => {
@@ -579,7 +927,7 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
               name: name || email.split('@')[0],
               email,
               phone,
-              role: ['teacher', 'admin', 'super-admin'].includes(role) ? role : 'teacher',
+              role: ['teacher', 'trainer', 'master-trainer', 'pro-trainer', 'admin', 'super-admin'].includes(role) ? role : 'teacher',
               state: STATES.includes(state) ? state : 'Lagos State',
               approvedForCertificate: false,
               totalScore: 0,
@@ -943,6 +1291,201 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
     }
   };
 
+  const gradingLibrarySubmissions = useMemo(() => {
+    return submissions
+      .filter((submission) => {
+        const teacher = users.find((user) => user.uid === submission.teacherId);
+        const week = getSubmissionWeek(submission, materials);
+        const recordType = getSubmissionType(submission, materials);
+
+        return (
+          (!gradingLibraryFilters.state || teacher?.state === gradingLibraryFilters.state) &&
+          (!gradingLibraryFilters.week || String(week || '') === gradingLibraryFilters.week) &&
+          (gradingLibraryFilters.type === 'all' || recordType === gradingLibraryFilters.type)
+        );
+      })
+      .sort((a, b) => Date.parse(b.submittedAt || '') - Date.parse(a.submittedAt || ''));
+  }, [gradingLibraryFilters, materials, submissions, users]);
+
+  const handleDownloadGradingLibrary = () => {
+    if (gradingLibrarySubmissions.length === 0) {
+      setNotification({ message: 'There are no filtered records to download.', type: 'error' });
+      return;
+    }
+
+    const data = gradingLibrarySubmissions.map((submission) => {
+      const teacher = users.find((user) => user.uid === submission.teacherId);
+      const week = getSubmissionWeek(submission, materials);
+      const recordType = getSubmissionType(submission, materials);
+
+      return {
+        'Teacher Name': teacher?.name || 'Unknown User',
+        Email: teacher?.email || '',
+        State: teacher?.state || '',
+        Week: week ? `Week ${week}` : '',
+        Type: recordType === 'assignment' ? 'Assignment' : 'Assessment',
+        Record: getSubmissionLabel(submission, materials),
+        Status: submission.status === 'graded' ? 'Graded' : 'Pending',
+        Score: typeof submission.score === 'number' ? submission.score : '',
+        Feedback: submission.feedback || '',
+        'Submitted At': submission.submittedAt ? new Date(submission.submittedAt).toLocaleString() : '',
+        'Submission Link': submission.contentUrl || '',
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    worksheet['!cols'] = [
+      { wch: 28 },
+      { wch: 30 },
+      { wch: 18 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 34 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 36 },
+      { wch: 22 },
+      { wch: 48 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Filtered Records');
+
+    const weekLabel = gradingLibraryFilters.week ? `week-${gradingLibraryFilters.week}` : 'all-weeks';
+    const stateLabel = (gradingLibraryFilters.state || 'all-states').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    const typeLabel =
+      gradingLibraryFilters.type === 'all' ? 'assignments-assessments' : `${gradingLibraryFilters.type}s`;
+    const dateLabel = new Date().toISOString().slice(0, 10);
+
+    XLSX.writeFile(workbook, `dltt-${typeLabel}-${weekLabel}-${stateLabel}-${dateLabel}.xlsx`);
+  };
+
+  const gradingLibraryColumns: DataTableColumn<AssignmentSubmission>[] = [
+    {
+      key: 'teacher',
+      header: 'Teacher',
+      sortable: true,
+      sortValue: (submission) => users.find((user) => user.uid === submission.teacherId)?.name || 'Unknown User',
+      render: (submission) => {
+        const teacher = users.find((user) => user.uid === submission.teacherId);
+
+        return (
+          <div>
+            <p className="font-semibold text-gray-900">{teacher?.name || 'Unknown User'}</p>
+            <p className="text-xs text-gray-500">{teacher?.email || submission.teacherId}</p>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'state',
+      header: 'State',
+      sortable: true,
+      sortValue: (submission) => users.find((user) => user.uid === submission.teacherId)?.state || '',
+      render: (submission) => (
+        <span className="text-sm text-gray-700">
+          {users.find((user) => user.uid === submission.teacherId)?.state || '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'week',
+      header: 'Week',
+      sortable: true,
+      sortValue: (submission) => getSubmissionWeek(submission, materials) || 0,
+      render: (submission) => {
+        const week = getSubmissionWeek(submission, materials);
+        return <span className="text-sm font-semibold text-gray-800">{week ? `Week ${week}` : '-'}</span>;
+      },
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      sortable: true,
+      sortValue: (submission) => getSubmissionType(submission, materials),
+      render: (submission) => {
+        const recordType = getSubmissionType(submission, materials);
+        return (
+          <span
+            className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+              recordType === 'assignment' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'
+            }`}
+          >
+            {recordType === 'assignment' ? 'Assignment' : 'Assessment'}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'record',
+      header: 'Record',
+      sortable: true,
+      sortValue: (submission) => getSubmissionLabel(submission, materials),
+      render: (submission) => <span className="text-sm text-gray-700">{getSubmissionLabel(submission, materials)}</span>,
+    },
+    {
+      key: 'score',
+      header: 'Status / Score',
+      sortable: true,
+      sortValue: (submission) => submission.score ?? -1,
+      render: (submission) => (
+        <div className="space-y-1">
+          <span
+            className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+              submission.status === 'graded' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'
+            }`}
+          >
+            {submission.status === 'graded' ? 'Graded' : 'Pending'}
+          </span>
+          <p className="text-sm font-bold text-gray-900">
+            {typeof submission.score === 'number' ? `${submission.score}/100` : '-'}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: 'submitted',
+      header: 'Submitted',
+      sortable: true,
+      sortValue: (submission) => Date.parse(submission.submittedAt || '') || 0,
+      render: (submission) => (
+        <span className="text-sm text-gray-600">
+          {submission.submittedAt ? new Date(submission.submittedAt).toLocaleDateString() : '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Submission',
+      headerClassName: 'text-right',
+      className: 'text-right',
+      render: (submission) => {
+        const canOpen = isDownloadableSubmissionUrl(submission.contentUrl);
+
+        return (
+          <div className="flex items-center justify-end">
+            {canOpen ? (
+              <a
+                href={submission.contentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-dltt-green"
+                title="View submission"
+                aria-label="View submission"
+              >
+                <ExternalLink size={18} />
+              </a>
+            ) : (
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-100 bg-gray-50 text-gray-300">
+                <ExternalLink size={18} />
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+
   const gradedSubmissionColumns: DataTableColumn<AssignmentSubmission>[] = [
     {
       key: 'teacher',
@@ -1200,6 +1743,7 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
           { id: 'users', label: 'User Management', icon: Users },
           { id: 'materials', label: 'Materials', icon: FileText },
           { id: 'grading', label: 'Grading', icon: CheckCircle },
+          { id: 'promotion', label: 'Promotion', icon: Shield },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -1218,7 +1762,7 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
 
       {activeTab === 'users' && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <p className="text-sm font-medium text-gray-500">Total Users</p>
               <p className="text-3xl font-bold text-gray-900">{users.length}</p>
@@ -1230,6 +1774,18 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <p className="text-sm font-medium text-gray-500">Teachers</p>
               <p className="text-3xl font-bold text-blue-600">{teacherCount}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <p className="text-sm font-medium text-gray-500">Trainers</p>
+              <p className="text-3xl font-bold text-amber-600">{trainerCount}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <p className="text-sm font-medium text-gray-500">Master Trainers</p>
+              <p className="text-3xl font-bold text-violet-600">{masterTrainerCount}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <p className="text-sm font-medium text-gray-500">Pro Trainers</p>
+              <p className="text-3xl font-bold text-rose-600">{proTrainerCount}</p>
             </div>
           </div>
 
@@ -1532,6 +2088,90 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
               </div>
             </form>
           </div>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-100">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Assignment & Assessment Library</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Filter assignment and assessment records by week and state, then export the results to Excel.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full lg:w-auto">
+                  <select
+                    value={gradingLibraryFilters.week}
+                    onChange={(e) => setGradingLibraryFilters((filters) => ({ ...filters, week: e.target.value }))}
+                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
+                    aria-label="Filter records by week"
+                  >
+                    <option value="">All Weeks</option>
+                    {WEEKS.map((week) => (
+                      <option key={week} value={week}>
+                        Week {week}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={gradingLibraryFilters.state}
+                    onChange={(e) => setGradingLibraryFilters((filters) => ({ ...filters, state: e.target.value }))}
+                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
+                    aria-label="Filter records by state"
+                  >
+                    <option value="">All States</option>
+                    {STATES.map((state) => (
+                      <option key={state} value={state}>
+                        {state}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={gradingLibraryFilters.type}
+                    onChange={(e) =>
+                      setGradingLibraryFilters((filters) => ({
+                        ...filters,
+                        type: e.target.value as GradingRecordType,
+                      }))
+                    }
+                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
+                    aria-label="Filter records by type"
+                  >
+                    <option value="all">Assignments & Assessments</option>
+                    <option value="assignment">Assignments</option>
+                    <option value="assessment">Assessments</option>
+                  </select>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <p className="text-sm font-medium text-gray-600">
+                  {gradingLibrarySubmissions.length} record{gradingLibrarySubmissions.length === 1 ? '' : 's'} found
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadGradingLibrary}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-dltt-green px-3 py-2 text-sm font-bold text-white hover:bg-dltt-green-dark"
+                  >
+                    <Download size={16} />
+                    Download Excel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGradingLibraryFilters({ week: '', state: '', type: 'all' })}
+                    className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              </div>
+            </div>
+            <DataTable
+              columns={gradingLibraryColumns}
+              rows={gradingLibrarySubmissions}
+              rowKey={(submission) => submission.id}
+              emptyMessage="No assignment or assessment records match these filters."
+              initialPageSize={10}
+            />
+          </div>
           <div className="space-y-4">
             {importPreviewRows.length > 0 && (
               <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
@@ -1683,6 +2323,94 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
         </div>
       )}
 
+      {activeTab === 'promotion' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <p className="text-sm font-medium text-gray-500">Eligible for Promotion</p>
+              <p className="text-3xl font-bold text-blue-600">{users.filter((user) => canPromoteRole(user.role)).length}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <p className="text-sm font-medium text-gray-500">Trainers</p>
+              <p className="text-3xl font-bold text-amber-600">{trainerCount}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <p className="text-sm font-medium text-gray-500">Master / Pro</p>
+              <p className="text-3xl font-bold text-violet-600">{masterTrainerCount + proTrainerCount}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <p className="text-sm font-medium text-gray-500">Selected</p>
+              <p className="text-3xl font-bold text-dltt-green">{selectedPromotionIds.size}</p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-gray-50/30">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Growth Path Promotion</h2>
+                <p className="text-sm text-gray-500">
+                  Select one or more eligible users, then advance them one step: Teacher, Trainer, Master Trainer, then Pro Trainer.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const visibleIds = promotionCandidates.map((teacher) => teacher.uid);
+                    const allVisibleSelected =
+                      visibleIds.length > 0 && visibleIds.every((teacherId) => selectedPromotionIds.has(teacherId));
+
+                    setSelectedPromotionIds((current) => {
+                      const next = new Set(current);
+                      visibleIds.forEach((teacherId) => {
+                        if (allVisibleSelected) {
+                          next.delete(teacherId);
+                        } else {
+                          next.add(teacherId);
+                        }
+                      });
+                      return next;
+                    });
+                  }}
+                  disabled={promotionCandidates.length === 0}
+                  className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {promotionCandidates.length > 0 &&
+                  promotionCandidates.every((teacher) => selectedPromotionIds.has(teacher.uid))
+                    ? 'Clear Visible'
+                    : 'Select Visible'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBulkPromoteUsers}
+                  disabled={selectedPromotionIds.size === 0}
+                  className="bg-dltt-green text-white px-5 py-2 rounded-xl font-bold hover:opacity-90 transition-opacity disabled:cursor-not-allowed disabled:bg-gray-300"
+                >
+                  Promote Selected
+                </button>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                  <input
+                    type="text"
+                    placeholder="Search candidates..."
+                    className="pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm w-full sm:w-72 focus:ring-2 focus:ring-dltt-green/20 focus:border-dltt-green outline-none transition-all"
+                    value={promotionSearchTerm}
+                    onChange={(event) => setPromotionSearchTerm(event.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+            <DataTable
+              columns={promotionColumns}
+              rows={promotionCandidates}
+              rowKey={(teacher) => teacher.uid}
+              emptyMessage="No teacher accounts are currently eligible for promotion."
+              initialPageSize={10}
+            />
+          </div>
+        </div>
+      )}
+
       {editingGrade && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
           <motion.div
@@ -1809,6 +2537,9 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
                   onChange={(e) => setNewUser({ ...newUser, role: e.target.value as UserRole })}
                 >
                   <option value="teacher">Teacher</option>
+                  <option value="trainer">Trainer</option>
+                  <option value="master-trainer">Master Trainer</option>
+                  <option value="pro-trainer">Pro Trainer</option>
                   <option value="admin">Admin</option>
                   <option value="super-admin">Super Admin</option>
                 </select>
@@ -1902,6 +2633,9 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
                     onChange={(e) => setShowEditUser({ ...showEditUser, role: e.target.value as UserRole })}
                   >
                     <option value="teacher">Teacher</option>
+                    <option value="trainer">Trainer</option>
+                    <option value="master-trainer">Master Trainer</option>
+                    <option value="pro-trainer">Pro Trainer</option>
                     <option value="admin">Admin</option>
                     <option value="super-admin">Super Admin</option>
                   </select>
@@ -1969,21 +2703,6 @@ export default function SuperAdminDashboard({ allowClearAllRecords = true }: { a
                   onChange={(e) => setShowEditUser({ ...showEditUser, accountName: e.target.value })}
                 />
               </div>
-              {showEditUser.role === 'teacher' && (
-                <label className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium flex items-center justify-between">
-                  <span>Approved for certificate</span>
-                  <input
-                    type="checkbox"
-                    checked={!!showEditUser.approvedForCertificate}
-                    onChange={(e) =>
-                      setShowEditUser({
-                        ...showEditUser,
-                        approvedForCertificate: e.target.checked,
-                      })
-                    }
-                  />
-                </label>
-              )}
               {showEditUser.role === 'teacher' && (
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Attendance by Week</label>

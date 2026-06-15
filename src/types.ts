@@ -1,4 +1,11 @@
-export type UserRole = 'super-admin' | 'admin' | 'teacher';
+export type UserRole = 'super-admin' | 'admin' | 'pro-trainer' | 'master-trainer' | 'trainer' | 'teacher';
+export type GrowthRole = 'teacher' | 'trainer' | 'master-trainer' | 'pro-trainer';
+
+export interface CertificationApproval {
+  approved: boolean;
+  approvedAt?: string;
+  approvedBy?: string;
+}
 
 export interface UserProfile {
   uid: string;
@@ -7,12 +14,16 @@ export interface UserProfile {
   phone: string;
   role: UserRole;
   state: string;
+  trainerId?: string;
+  createdBy?: string;
+  promotedAt?: string;
   school?: string;
   gender?: string;
   lastLoginAt?: string;
   profilePhoto?: string;
   certificateName?: string;
   approvedForCertificate: boolean;
+  certifications?: Partial<Record<GrowthRole, CertificationApproval>>;
   totalScore: number;
   attendance: Record<string, boolean>; // e.g., { 'week1': true }
   assignmentCompletion: Record<string, boolean>; // e.g., { 'materialId': true }
@@ -38,6 +49,7 @@ export interface LearningMaterial {
   dueDate?: string; // ISO string for assignments
   week: number; // 1, 2, 3, 4
   createdAt: string;
+  createdBy?: string;
 }
 
 export interface AssignmentSubmission {
@@ -76,12 +88,31 @@ export interface TeacherStateStats {
   completionRate: number;
 }
 
+export interface StateGrowthStats {
+  state: string;
+  teachers: number;
+  trainers: number;
+  masterTrainers: number;
+  proTrainers: number;
+  total: number;
+}
+
 export interface TrainingStats {
   enrollment: number;
+  trainerCount: number;
+  masterTrainerCount: number;
+  proTrainerCount: number;
   completionRate: number;
   activeTeachers: number;
   genderDistribution: GenderDistributionItem[];
   stateLeaderboard: { state: string; score: number }[];
   teachersByState: TeacherStateStats[];
+  growthByState: StateGrowthStats[];
   teacherLeaderboard: { name: string; score: number; state: string }[];
+  levelLeaderboards: {
+    role: GrowthRole;
+    title: string;
+    count: number;
+    performers: { name: string; score: number; state: string }[];
+  }[];
 }

@@ -11,8 +11,16 @@ import PublicDashboard from './components/PublicDashboard';
 import LandingPage from './components/LandingPage';
 import TeacherDashboard from './components/TeacherDashboard';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
+import TrainerDashboard from './components/TrainerDashboard';
 import Login from './components/Login';
 import foundationLogo from './assets/foundation-logo.png';
+
+function formatRoleLabel(role: UserProfile['role']) {
+  return role
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -143,7 +151,7 @@ export default function App() {
                   <div className="flex items-center space-x-4 ml-4 pl-4 border-l border-gray-200">
                     <div className="text-right">
                       <p className="text-sm font-semibold text-gray-900 leading-none">{user.name}</p>
-                      <p className="text-xs text-gray-500 mt-1 capitalize">{user.role}</p>
+                      <p className="text-xs text-gray-500 mt-1">{formatRoleLabel(user.role)}</p>
                     </div>
                     <button
                       onClick={handleLogout}
@@ -268,7 +276,9 @@ export default function App() {
               element={
                 user ? (
                   user.role === 'super-admin' || user.role === 'admin' ? (
-                    <SuperAdminDashboard allowClearAllRecords={user.role === 'super-admin'} />
+                    <SuperAdminDashboard allowClearAllRecords={user.role === 'super-admin'} currentUser={user} />
+                  ) : ['trainer', 'master-trainer', 'pro-trainer'].includes(user.role) ? (
+                    <TrainerDashboard user={user} />
                   ) : (
                     <TeacherDashboard user={user} />
                   )

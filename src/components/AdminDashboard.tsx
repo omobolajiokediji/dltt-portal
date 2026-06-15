@@ -210,16 +210,13 @@ export default function AdminDashboard() {
       headerClassName: 'text-center',
       className: 'text-center',
       render: (teacher) => (
-        <button
-          onClick={() => handleApproveCertificate(teacher.uid, !teacher.approvedForCertificate)}
-          className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-            teacher.approvedForCertificate
-              ? 'bg-green-100 text-green-700 hover:bg-green-200'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+        <span
+          className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold ${
+            teacher.approvedForCertificate ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
           }`}
         >
-          {teacher.approvedForCertificate ? 'Approved' : 'Approve'}
-        </button>
+          {teacher.approvedForCertificate ? 'Approved' : 'Pending'}
+        </span>
       ),
     },
     {
@@ -515,20 +512,6 @@ export default function AdminDashboard() {
       setNotification({ message: 'Grade submitted successfully.', type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'submissions');
-    }
-  };
-
-  const handleApproveCertificate = async (teacherId: string, approved: boolean) => {
-    try {
-      await updateDoc(doc(db, 'users', teacherId), {
-        approvedForCertificate: approved,
-      });
-      setNotification({
-        message: approved ? 'Certificate approved.' : 'Certificate approval removed.',
-        type: 'success',
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'users');
     }
   };
 

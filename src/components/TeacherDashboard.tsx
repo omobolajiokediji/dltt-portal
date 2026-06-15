@@ -10,6 +10,7 @@ import {
   Clock,
   FileText,
   ImageIcon,
+  Lock,
   Pencil,
   Trophy,
   Users,
@@ -17,11 +18,9 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db } from '../lib/firebase';
-import foundationLogo from '../assets/foundation-logo.png?inline';
-import signature1 from '../assets/signature1.png?inline';
-import signature2 from '../assets/signature2.png?inline';
 import { AssignmentSubmission, LearningMaterial, PortalSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
+import { buildCertificateMarkup, isCertificationApproved, renderCertificatePdf } from '../lib/certificates';
 import { sortMaterialsByNewest } from '../lib/materials';
 import { getTeacherProfileEditingDisabled, subscribeToPortalSettings } from '../lib/portalSettings';
 import { getTeacherProgress, isMaterialAssignedToUser } from '../lib/training';
@@ -34,215 +33,6 @@ interface SubmissionModalState {
   materialId: string;
   submissionId?: string;
   title: string;
-}
-
-function buildCertificateMarkup(user: UserProfile) {
-  const certificateName = user.certificateName?.trim() || user.name;
-  const issuedDate = new Date().toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-  const safeName = escapeSvgText(certificateName);
-  const safeDate = escapeSvgText(issuedDate);
-  const nameFontSize = certificateName.length > 34 ? 54 : certificateName.length > 26 ? 62 : 72;
-  const logoUrl = escapeSvgText(foundationLogo);
-  const leftSignatureUrl = escapeSvgText(signature2);
-  const rightSignatureUrl = escapeSvgText(signature1);
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="990" viewBox="0 0 1400 990" role="img" aria-label="DLTT certificate for ${safeName}">
-  <defs>
-    <linearGradient id="certificateBorder" x1="85" y1="80" x2="1315" y2="910" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#15924a" />
-      <stop offset="1" stop-color="#d8d91f" />
-    </linearGradient>
-    <linearGradient id="sealGold" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#fff4a8" />
-      <stop offset="0.35" stop-color="#d9a51f" />
-      <stop offset="0.7" stop-color="#fff2a6" />
-      <stop offset="1" stop-color="#b67814" />
-    </linearGradient>
-    <filter id="certificateShadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#073b1f" flood-opacity="0.12" />
-    </filter>
-  </defs>
-
-  <rect width="1400" height="990" fill="#f8faf7" />
-  <rect x="88" y="55" width="1224" height="880" rx="42" fill="#ffffff" filter="url(#certificateShadow)" />
-  <rect x="112" y="80" width="1176" height="830" rx="34" fill="none" stroke="url(#certificateBorder)" stroke-width="6" />
-
-  <image href="${logoUrl}" x="178" y="106" width="120" height="120" preserveAspectRatio="xMidYMid meet" />
-
-  <text x="700" y="172" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="82" font-weight="700" letter-spacing="10" fill="#168747">CERTIFICATE</text>
-  <text x="700" y="230" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="38" font-weight="700" letter-spacing="6" fill="#168747">OF COMPLETION</text>
-
-  <text x="700" y="322" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="22" letter-spacing="4" fill="#0b3f22">THIS IS TO CERTIFY THAT</text>
-  <text x="700" y="432" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="${nameFontSize}" font-weight="700" fill="#0b3f22">${safeName}</text>
-  <line x1="225" y1="454" x2="1175" y2="454" stroke="#0b3f22" stroke-width="3" />
-  <circle cx="225" cy="454" r="4" fill="#ffffff" stroke="#0b3f22" stroke-width="3" />
-  <circle cx="1175" cy="454" r="4" fill="#ffffff" stroke="#0b3f22" stroke-width="3" />
-
-  <text x="700" y="530" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="28" letter-spacing="3" fill="#0b3f22">
-    <tspan>has successfully completed the </tspan>
-    <tspan font-weight="700">Digital Literacy Training for</tspan>
-  </text>
-  <text x="700" y="570" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="28" letter-spacing="3" fill="#0b3f22">
-    <tspan font-weight="700">Teachers (DLTT)</tspan>
-    <tspan> programme and is hereby acknowledged for</tspan>
-  </text>
-  <text x="700" y="610" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="28" letter-spacing="3" fill="#0b3f22">dedication, skill development, and excellence.</text>
-
-  <g transform="translate(700 710)">
-    <polygon points="0,-58 15,-18 58,-18 24,6 37,48 0,22 -37,48 -24,6 -58,-18 -15,-18" fill="url(#sealGold)" stroke="#c58a16" stroke-width="3" />
-    <circle cx="0" cy="0" r="37" fill="#fff3a5" stroke="#c58a16" stroke-width="4" />
-    <path d="M -58 58 C -34 34, -12 34, 0 60 C 12 34, 34 34, 58 58 L 35 92 L 0 70 L -35 92 Z" fill="url(#sealGold)" stroke="#c58a16" stroke-width="3" />
-  </g>
-
-  <g>
-    <line x1="205" y1="742" x2="510" y2="742" stroke="#d9c897" stroke-width="2" />
-    <image href="${leftSignatureUrl}" x="238" y="656" width="250" height="88" preserveAspectRatio="xMidYMid meet" />
-    <text x="358" y="790" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="28" font-weight="700" fill="#0b3f22">Prof. Seun Kolade</text>
-    <text x="358" y="822" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="15" letter-spacing="1.5" fill="#334155">Project Director, DEFINED Project</text>
-  </g>
-
-  <g>
-    <line x1="890" y1="742" x2="1195" y2="742" stroke="#d9c897" stroke-width="2" />
-    <image href="${rightSignatureUrl}" x="918" y="656" width="250" height="88" preserveAspectRatio="xMidYMid meet" />
-    <text x="1042" y="790" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="28" font-weight="700" fill="#0b3f22">Mrs. Abiola Ajayi</text>
-    <text x="1042" y="822" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="15" letter-spacing="1.2" fill="#334155">Ag. Executive Secretary,</text>
-    <text x="1042" y="846" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="15" letter-spacing="1.2" fill="#334155">Odu'a Investment Foundation</text>
-  </g>
-
-  <text x="700" y="875" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="24" letter-spacing="3" fill="#0b3f22">Issued on: <tspan font-weight="700">${safeDate}</tspan></text>
-</svg>`;
-}
-
-function escapeSvgText(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function loadImage(src: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = reject;
-    image.src = src;
-  });
-}
-
-async function renderCertificatePdf(certificateMarkup: string) {
-  const svgBlob = new Blob([certificateMarkup], { type: 'image/svg+xml;charset=utf-8' });
-  const svgUrl = URL.createObjectURL(svgBlob);
-
-  try {
-    const image = await loadImage(svgUrl);
-    const canvas = document.createElement('canvas');
-    canvas.width = 2800;
-    canvas.height = 1980;
-
-    const context = canvas.getContext('2d');
-    if (!context) {
-      throw new Error('Could not prepare certificate canvas.');
-    }
-
-    context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-    const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    const jpegBytes = dataUrlToBytes(jpegDataUrl);
-
-    return buildSingleImagePdf(jpegBytes, canvas.width, canvas.height);
-  } finally {
-    URL.revokeObjectURL(svgUrl);
-  }
-}
-
-function dataUrlToBytes(dataUrl: string) {
-  const base64 = dataUrl.split(',')[1] || '';
-  const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return bytes;
-}
-
-function buildSingleImagePdf(imageBytes: Uint8Array, imageWidth: number, imageHeight: number) {
-  const pageWidth = 842;
-  const pageHeight = 595;
-  const margin = 18;
-  const availableWidth = pageWidth - margin * 2;
-  const availableHeight = pageHeight - margin * 2;
-  const scale = Math.min(availableWidth / imageWidth, availableHeight / imageHeight);
-  const drawWidth = imageWidth * scale;
-  const drawHeight = imageHeight * scale;
-  const drawX = (pageWidth - drawWidth) / 2;
-  const drawY = (pageHeight - drawHeight) / 2;
-  const content = `q\n${drawWidth.toFixed(2)} 0 0 ${drawHeight.toFixed(2)} ${drawX.toFixed(2)} ${drawY.toFixed(2)} cm\n/Im0 Do\nQ`;
-  const textEncoder = new TextEncoder();
-  const objects: Uint8Array[] = [
-    textEncoder.encode('<< /Type /Catalog /Pages 2 0 R >>'),
-    textEncoder.encode('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
-    textEncoder.encode(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`,
-    ),
-    concatBytes([
-      textEncoder.encode(
-        `<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageBytes.length} >>\nstream\n`,
-      ),
-      imageBytes,
-      textEncoder.encode('\nendstream'),
-    ]),
-    textEncoder.encode(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`),
-  ];
-
-  return writePdf(objects);
-}
-
-function writePdf(objects: Uint8Array[]) {
-  const textEncoder = new TextEncoder();
-  const chunks: Uint8Array[] = [textEncoder.encode('%PDF-1.4\n')];
-  const offsets: number[] = [0];
-  let byteLength = chunks[0].length;
-
-  objects.forEach((object, index) => {
-    offsets.push(byteLength);
-    const header = textEncoder.encode(`${index + 1} 0 obj\n`);
-    const footer = textEncoder.encode('\nendobj\n');
-    chunks.push(header, object, footer);
-    byteLength += header.length + object.length + footer.length;
-  });
-
-  const xrefOffset = byteLength;
-  const xrefRows = offsets
-    .map((offset, index) => (index === 0 ? '0000000000 65535 f ' : `${String(offset).padStart(10, '0')} 00000 n `))
-    .join('\n');
-  const trailer = `xref\n0 ${objects.length + 1}\n${xrefRows}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  chunks.push(textEncoder.encode(trailer));
-
-  return new Blob(chunks, { type: 'application/pdf' });
-}
-
-function concatBytes(parts: Uint8Array[]) {
-  const byteLength = parts.reduce((total, part) => total + part.length, 0);
-  const bytes = new Uint8Array(byteLength);
-  let offset = 0;
-
-  for (const part of parts) {
-    bytes.set(part, offset);
-    offset += part.length;
-  }
-
-  return bytes;
 }
 
 function getWeeklyTestScoreLabel(materialId: string) {
@@ -343,7 +133,8 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
   }, [submissions]);
 
   const progress = useMemo(() => getTeacherProgress(user, materials, submissions), [materials, submissions, user]);
-  const certificateMarkup = useMemo(() => buildCertificateMarkup(user), [user]);
+  const teacherCertificateApproved = isCertificationApproved(user, 'teacher');
+  const certificateMarkup = useMemo(() => buildCertificateMarkup(user, 'teacher'), [user]);
   const isProfileEditingDisabled = getTeacherProfileEditingDisabled(portalSettings);
   const editableProfileFieldClass = `w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-dltt-green outline-none ${
     isProfileEditingDisabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''
@@ -352,6 +143,13 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
     progress.totalAssignments > 0 &&
     progress.submittedAssignments === progress.totalAssignments &&
     progress.attendanceCount === 4;
+  const socialPosterAvailable = progress.attendanceCount >= 4;
+
+  useEffect(() => {
+    if (activeTab === 'poster' && !socialPosterAvailable) {
+      setActiveTab('materials');
+    }
+  }, [activeTab, socialPosterAvailable]);
 
   const handleOpenSubmissionModal = (material: LearningMaterial, submission?: AssignmentSubmission) => {
     setSubmissionModal({
@@ -518,16 +316,25 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
           { id: 'materials', label: 'Learning Materials', icon: BookOpen },
           { id: 'assignments', label: 'My Submissions', icon: FileText },
           { id: 'certificate', label: 'Certificate', icon: Award },
-          { id: 'poster', label: 'Social Poster', icon: ImageIcon },
+          {
+            id: 'poster',
+            label: 'Social Poster',
+            icon: socialPosterAvailable ? ImageIcon : Lock,
+            locked: !socialPosterAvailable,
+          },
           { id: 'profile', label: 'Profile', icon: Users },
         ].map((tab) => (
           <button
             key={tab.id}
+            disabled={tab.locked}
+            title={tab.locked ? 'Complete 4 weeks of attendance to unlock Social Poster.' : undefined}
             onClick={() => setActiveTab(tab.id as typeof activeTab)}
             className={`flex items-center space-x-2 px-4 py-2 border-b-2 font-medium transition-colors whitespace-nowrap ${
               activeTab === tab.id
                 ? 'border-dltt-green text-dltt-green'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                : tab.locked
+                  ? 'border-transparent text-gray-300 cursor-not-allowed'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
             <tab.icon size={18} />
@@ -724,7 +531,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
 
         {activeTab === 'certificate' && (
           <div className="flex flex-col items-center justify-center py-12 bg-white rounded-2xl shadow-sm border border-gray-100">
-            {user.approvedForCertificate ? (
+            {teacherCertificateApproved ? (
               <div className="text-center space-y-6">
                 <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto">
                   <Award size={48} />
@@ -751,7 +558,7 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
                 </div>
                 <h2 className="text-xl font-bold text-gray-900">Certificate Pending</h2>
                 <p className="text-gray-600">
-                  Your certificate becomes available after an admin reviews your activity and approves course completion.
+                  Your certificate becomes available after SuperAdmin reviews your activity and approves course completion.
                 </p>
                 <div className="bg-blue-50 p-4 rounded-xl text-left space-y-3">
                   <h3 className="text-sm font-bold text-blue-800 flex items-center">
@@ -787,7 +594,22 @@ export default function TeacherDashboard({ user }: { user: UserProfile }) {
           </div>
         )}
 
-        {activeTab === 'poster' && <TeacherPosterBuilder user={user} />}
+        {activeTab === 'poster' && socialPosterAvailable && <TeacherPosterBuilder user={user} />}
+
+        {activeTab === 'poster' && !socialPosterAvailable && (
+          <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 max-w-2xl mx-auto w-full text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 text-gray-500">
+              <Lock size={24} />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Social Poster Locked</h2>
+            <p className="text-gray-600">
+              Complete 4 weeks of attendance to unlock your DLTT Social Poster.
+            </p>
+            <p className="mt-4 text-sm font-semibold text-dltt-green">
+              Attendance recorded: {progress.attendanceCount}/4 weeks
+            </p>
+          </div>
+        )}
 
         {activeTab === 'profile' && (
           <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 max-w-2xl mx-auto w-full">
