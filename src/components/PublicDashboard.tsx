@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { GenderDistributionItem, StateGrowthStats, TrainingStats } from '../types';
-import { Users, Map, Trophy, UserCheck, Medal, Sparkles } from 'lucide-react';
+import { CheckCircle, Users, Map, Trophy, UserCheck, Medal, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 
 function getPiePath(cx: number, cy: number, radius: number, startAngle: number, endAngle: number) {
@@ -287,11 +287,12 @@ export default function PublicDashboard() {
 
   const cards = [
     { title: 'Total Teachers', value: stats?.enrollment || 0, icon: Users, color: 'bg-blue-50 text-blue-600' },
+    { title: 'Active Teachers', value: stats?.activeTeachers || 0, icon: Trophy, color: 'bg-yellow-50 text-yellow-600' },
+    { title: 'States Covered', value: stats?.teachersByState?.length || 0, icon: Map, color: 'bg-purple-50 text-purple-600' },
+    { title: 'Completion Rate', value: `${stats?.completionRate || 0}%`, icon: CheckCircle, color: 'bg-green-50 text-green-600' },
     { title: 'Trainers', value: stats?.trainerCount || 0, icon: UserCheck, color: 'bg-emerald-50 text-emerald-600' },
     { title: 'Master Trainers', value: stats?.masterTrainerCount || 0, icon: Medal, color: 'bg-amber-50 text-amber-600' },
     { title: 'Pro Trainers', value: stats?.proTrainerCount || 0, icon: Sparkles, color: 'bg-rose-50 text-rose-600' },
-    { title: 'Active Teachers', value: stats?.activeTeachers || 0, icon: Trophy, color: 'bg-yellow-50 text-yellow-600' },
-    { title: 'States Covered', value: stats?.teachersByState?.length || 0, icon: Map, color: 'bg-purple-50 text-purple-600' },
   ];
 
   return (
@@ -304,7 +305,7 @@ export default function PublicDashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-12">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
         {cards.map((card, index) => (
           <motion.div
             key={card.title}
