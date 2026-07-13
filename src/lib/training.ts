@@ -126,24 +126,34 @@ export function buildTrainingStats(
   materials: LearningMaterial[],
   submissions: AssignmentSubmission[],
 ): TrainingStats {
-  const teachers = users.filter((user) => user.role === 'teacher');
-  const trainerCount = users.filter((user) => user.role === 'trainer').length;
-  const seniorTrainerCount = users.filter((user) => user.role === 'senior-trainer').length;
-  const masterTrainerCount = users.filter((user) => user.role === 'master-trainer').length;
-  const teacherProgress = teachers.map((teacher) => {
-    const progress = getTeacherProgress(teacher, materials, submissions);
+  const activeUsers = users.filter((user) => !user.archived);
+  const activeGrowthUsers = activeUsers.filter((user) =>
+    ['teacher', 'trainer', 'senior-trainer', 'master-trainer'].includes(user.role),
+  );
+  const teachers = activeUsers.filter((user) => user.role === 'teacher');
+  const trainerCount = activeUsers.filter((user) => user.role === 'trainer').length;
+  const seniorTrainerCount = activeUsers.filter((user) => user.role === 'senior-trainer').length;
+  const masterTrainerCount = activeUsers.filter((user) => user.role === 'master-trainer').length;
+  const growthProgress = activeGrowthUsers.map((user) => {
+    const progress = getTeacherProgress(user, materials, submissions);
     return {
-      teacher,
+      user,
       progress,
     };
   });
+  const teacherProgress = growthProgress
+    .filter((entry) => entry.user.role === 'teacher')
+    .map((entry) => ({
+      teacher: entry.user,
+      progress: entry.progress,
+    }));
 
   const enrollment = teachers.length;
   const activeTeachers = teachers.filter((teacher) => !!teacher.lastLoginAt).length;
   const completionRate =
-    teacherProgress.length > 0
+    growthProgress.length > 0
       ? Math.round(
-          teacherProgress.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / teacherProgress.length,
+          growthProgress.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / growthProgress.length,
         )
       : 0;
 
@@ -161,8 +171,62 @@ export function buildTrainingStats(
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .slice(0, 20);
 
+  const buildRoleBreakdown = (role: GrowthRole) => {
+    const roleProgress = growthProgress.filter((entry) => entry.user.role === role);
+
+    const stateDistribution = STATES.map((state) => {
+      const stateEntries = roleProgress.filter((entry) => entry.user.state === state);
+      const count = stateEntries.length;
+      const activeCount = stateEntries.filter((entry) => !!entry.user.lastLoginAt).length;
+      const avgScore = count
+        ? Math.round(stateEntries.reduce((sum, entry) => sum + entry.progress.totalScore, 0) / count)
+        : 0;
+      const completionRateByState = count
+        ? Math.round(stateEntries.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / count)
+        : 0;
+
+      return {
+        state,
+        count,
+        activeCount,
+        avgScore,
+        completionRate: completionRateByState,
+      };
+    })
+      .filter((item) => item.count > 0)
+      .sort((a, b) => b.count - a.count || a.state.localeCompare(b.state));
+
+    const roleUsers = roleProgress.map((entry) => entry.user);
+    const genderDistribution = [
+      { label: 'Male', count: roleUsers.filter((user) => user.gender?.toLowerCase() === 'male').length, color: '#2e9107' },
+      { label: 'Female', count: roleUsers.filter((user) => user.gender?.toLowerCase() === 'female').length, color: '#ebe725' },
+    ];
+
+    const leaderboard = roleProgress
+      .map(({ user, progress }) => ({
+        name: user.name,
+        score: progress.totalScore,
+        state: user.state,
+      }))
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+      .slice(0, 20);
+
+    return {
+      stateDistribution,
+      genderDistribution,
+      leaderboard,
+    };
+  };
+
+  const roleBreakdowns = {
+    teacher: buildRoleBreakdown('teacher'),
+    trainer: buildRoleBreakdown('trainer'),
+    'senior-trainer': buildRoleBreakdown('senior-trainer'),
+    'master-trainer': buildRoleBreakdown('master-trainer'),
+  };
+
   const levelLeaderboards = GROWTH_LEVELS.map((level) => {
-    const levelUsers = users.filter((user) => user.role === level.role);
+    const levelUsers = activeUsers.filter((user) => user.role === level.role);
     return {
       ...level,
       count: levelUsers.length,
@@ -181,13 +245,13 @@ export function buildTrainingStats(
   }).filter((level) => level.count > 0);
 
   const stateLeaderboard = STATES.map((state) => {
-    const stateTeachers = teacherProgress.filter((entry) => entry.teacher.state === state);
-    if (stateTeachers.length === 0) {
+    const stateEntries = growthProgress.filter((entry) => entry.user.state === state);
+    if (stateEntries.length === 0) {
       return { state, score: 0 };
     }
 
     const score = Math.round(
-      stateTeachers.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / stateTeachers.length,
+      stateEntries.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / stateEntries.length,
     );
 
     return { state, score };
@@ -218,7 +282,7 @@ export function buildTrainingStats(
     .sort((a, b) => b.count - a.count || a.state.localeCompare(b.state));
 
   const growthByState = STATES.map((state) => {
-    const stateUsers = users.filter((user) => user.state === state);
+    const stateUsers = activeUsers.filter((user) => user.state === state);
     const teachers = stateUsers.filter((user) => user.role === 'teacher').length;
     const trainers = stateUsers.filter((user) => user.role === 'trainer').length;
     const seniorTrainers = stateUsers.filter((user) => user.role === 'senior-trainer').length;
@@ -243,6 +307,7 @@ export function buildTrainingStats(
     activeTeachers,
     genderDistribution,
     teacherLeaderboard,
+    roleBreakdowns,
     levelLeaderboards,
     stateLeaderboard,
     teachersByState,
@@ -271,7 +336,7 @@ export async function syncTrainingDerivedData(
   submissions: AssignmentSubmission[],
 ) {
   const teachers = users.filter((user) =>
-    ['teacher', 'trainer', 'senior-trainer', 'master-trainer'].includes(user.role),
+    !user.archived && ['teacher', 'trainer', 'senior-trainer', 'master-trainer'].includes(user.role),
   );
   const batch = writeBatch(db);
 

@@ -15,6 +15,8 @@ import {
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import {
   AlertTriangle,
+  Archive,
+  ArchiveRestore,
   AudioWaveform,
   BookOpen,
   CheckCircle,
@@ -400,23 +402,28 @@ export default function SuperAdminDashboard({
   ]);
 
   useEffect(() => {
-    const candidateIds = new Set(users.filter((user) => canPromoteRole(user.role)).map((user) => user.uid));
+    const candidateIds = new Set(users.filter((user) => !user.archived && canPromoteRole(user.role)).map((user) => user.uid));
     setSelectedPromotionIds((current) => new Set([...current].filter((userId) => candidateIds.has(userId))));
   }, [users]);
 
+  const activeUsers = users.filter((user) => !user.archived);
+  const archivedUserCount = users.length - activeUsers.length;
+
   const teacherProgressMap = useMemo(() => {
     return new Map(
-      users
+      activeUsers
         .filter((user) => ['teacher', 'trainer', 'senior-trainer', 'master-trainer'].includes(user.role))
         .map((teacher) => [teacher.uid, getTeacherProgress(teacher, materials, submissions)]),
     );
-  }, [users, materials, submissions]);
+  }, [activeUsers, materials, submissions]);
 
   const filteredUsers = users.filter((user) => {
     const searchValue = searchTerm.toLowerCase();
     return (
       user.name.toLowerCase().includes(searchValue) ||
       user.email.toLowerCase().includes(searchValue) ||
+      user.state.toLowerCase().includes(searchValue) ||
+      (user.archived ? 'archived' : 'active').includes(searchValue) ||
       (user.phone || '').includes(searchTerm)
     );
   });
@@ -428,12 +435,12 @@ export default function SuperAdminDashboard({
     .filter((submission) => submission.status === 'graded')
     .sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt));
 
-  const teacherCount = users.filter((user) => user.role === 'teacher').length;
-  const adminCount = users.filter((user) => user.role === 'admin').length;
-  const trainerCount = users.filter((user) => user.role === 'trainer').length;
-  const seniorTrainerCount = users.filter((user) => user.role === 'senior-trainer').length;
-  const masterTrainerCount = users.filter((user) => user.role === 'master-trainer').length;
-  const promotionCandidates = users
+  const teacherCount = activeUsers.filter((user) => user.role === 'teacher').length;
+  const adminCount = activeUsers.filter((user) => user.role === 'admin').length;
+  const trainerCount = activeUsers.filter((user) => user.role === 'trainer').length;
+  const seniorTrainerCount = activeUsers.filter((user) => user.role === 'senior-trainer').length;
+  const masterTrainerCount = activeUsers.filter((user) => user.role === 'master-trainer').length;
+  const promotionCandidates = activeUsers
     .filter((user) => canPromoteRole(user.role))
     .filter((user) => {
       const searchValue = promotionSearchTerm.toLowerCase();
@@ -537,6 +544,21 @@ export default function SuperAdminDashboard({
       ),
     },
     {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: (user) => (user.archived ? 'archived' : 'active'),
+      render: (user) => (
+        <span
+          className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${
+            user.archived ? 'bg-gray-100 text-gray-600' : 'bg-green-50 text-green-700'
+          }`}
+        >
+          {user.archived ? 'Archived' : 'Active'}
+        </span>
+      ),
+    },
+    {
       key: 'state',
       header: 'State',
       sortable: true,
@@ -631,12 +653,28 @@ export default function SuperAdminDashboard({
           <button
             onClick={() => setShowEditUser(user)}
             className="p-2 text-gray-400 hover:text-dltt-green hover:bg-green-50 rounded-lg transition-all"
+            title="Edit user"
+            aria-label={`Edit ${user.name}`}
           >
             <Edit size={18} />
           </button>
           <button
+            onClick={() => handleArchiveUser(user, !user.archived)}
+            className={`p-2 rounded-lg transition-all ${
+              user.archived
+                ? 'text-gray-400 hover:text-dltt-green hover:bg-green-50'
+                : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50'
+            }`}
+            title={user.archived ? 'Unarchive user' : 'Archive user'}
+            aria-label={`${user.archived ? 'Unarchive' : 'Archive'} ${user.name}`}
+          >
+            {user.archived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
+          </button>
+          <button
             onClick={() => handleDeleteUser(user)}
             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+            title="Delete user profile"
+            aria-label={`Delete ${user.name}`}
           >
             <Trash2 size={18} />
           </button>
@@ -796,7 +834,7 @@ export default function SuperAdminDashboard({
   };
 
   const handleDownloadTeachers = () => {
-    const teachers = users.filter((user) => user.role === 'teacher');
+    const teachers = activeUsers.filter((user) => user.role === 'teacher');
     const data = teachers.map((teacher) => ({
       'Full Name': teacher.name,
       State: teacher.state,
@@ -878,7 +916,7 @@ export default function SuperAdminDashboard({
   };
 
   const promoteUsersToNextLevel = async (userIds: string[]) => {
-    const promotableUsers = users.filter((user) => userIds.includes(user.uid) && canPromoteRole(user.role));
+    const promotableUsers = activeUsers.filter((user) => userIds.includes(user.uid) && canPromoteRole(user.role));
 
     if (promotableUsers.length === 0) {
       setNotification({ message: 'Select at least one eligible user to promote.', type: 'error' });
@@ -1746,6 +1784,46 @@ export default function SuperAdminDashboard({
     });
   };
 
+  const handleArchiveUser = (user: UserProfile, archived: boolean) => {
+    if (currentUser?.uid === user.uid && archived) {
+      setNotification({ message: 'You cannot archive your own account while signed in.', type: 'error' });
+      return;
+    }
+
+    setConfirmDialog({
+      isOpen: true,
+      title: archived ? 'Archive User' : 'Unarchive User',
+      message: archived
+        ? `Archive ${user.name}? They will stop appearing as an active user and will no longer count toward dashboard totals.`
+        : `Restore ${user.name} as an active user? They will appear in active lists and dashboard totals again.`,
+      isDanger: archived,
+      onConfirm: async () => {
+        try {
+          await updateDoc(
+            doc(db, 'users', user.uid),
+            archived
+              ? {
+                  archived: true,
+                  archivedAt: new Date().toISOString(),
+                  archivedBy: currentUser?.uid || '',
+                }
+              : {
+                  archived: false,
+                  archivedAt: deleteField(),
+                  archivedBy: deleteField(),
+                },
+          );
+          setNotification({
+            message: archived ? 'User archived successfully.' : 'User restored successfully.',
+            type: 'success',
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, 'users');
+        }
+      },
+    });
+  };
+
   const handleDeleteUser = (user: UserProfile) => {
     setConfirmDialog({
       isOpen: true,
@@ -1860,8 +1938,8 @@ export default function SuperAdminDashboard({
         <>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-              <p className="text-sm font-medium text-gray-500">Total Users</p>
-              <p className="text-3xl font-bold text-gray-900">{users.length}</p>
+              <p className="text-sm font-medium text-gray-500">Active Users</p>
+              <p className="text-3xl font-bold text-gray-900">{activeUsers.length}</p>
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <p className="text-sm font-medium text-gray-500">Admins</p>
@@ -1882,6 +1960,10 @@ export default function SuperAdminDashboard({
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <p className="text-sm font-medium text-gray-500">Master Trainers</p>
               <p className="text-3xl font-bold text-rose-600">{masterTrainerCount}</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <p className="text-sm font-medium text-gray-500">Archived</p>
+              <p className="text-3xl font-bold text-gray-500">{archivedUserCount}</p>
             </div>
           </div>
 
@@ -2135,7 +2217,7 @@ export default function SuperAdminDashboard({
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
                 >
                   <option value="">Select teacher</option>
-                  {users
+                  {activeUsers
                     .filter(
                       (user) =>
                         user.role === 'teacher' &&
@@ -2424,7 +2506,7 @@ export default function SuperAdminDashboard({
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <p className="text-sm font-medium text-gray-500">Eligible for Promotion</p>
-              <p className="text-3xl font-bold text-blue-600">{users.filter((user) => canPromoteRole(user.role)).length}</p>
+              <p className="text-3xl font-bold text-blue-600">{activeUsers.filter((user) => canPromoteRole(user.role)).length}</p>
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <p className="text-sm font-medium text-gray-500">Trainers</p>
@@ -2988,7 +3070,7 @@ export default function SuperAdminDashboard({
                     />
                     <span className="text-sm font-medium">All Users</span>
                   </label>
-                  {users.map((user) => (
+                  {activeUsers.map((user) => (
                     <label key={user.uid} className="flex items-center space-x-2">
                       <input
                         type="checkbox"

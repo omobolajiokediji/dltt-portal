@@ -125,7 +125,11 @@ export default function TrainerDashboard({ user }: { user: UserProfile }) {
     const unsubscribeTeachers = onSnapshot(
       teachersQuery,
       (snapshot) => {
-        setTeachers(snapshot.docs.map((item) => ({ uid: item.id, ...item.data() })) as UserProfile[]);
+        setTeachers(
+          (snapshot.docs.map((item) => ({ uid: item.id, ...item.data() })) as UserProfile[]).filter(
+            (teacher) => !teacher.archived,
+          ),
+        );
         setLoading(false);
       },
       (error) => {

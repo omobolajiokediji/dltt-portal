@@ -42,6 +42,7 @@ const defaultMaterialState: MaterialFormState = {
 
 export default function AdminDashboard() {
   const [materials, setMaterials] = useState<LearningMaterial[]>([]);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [teachers, setTeachers] = useState<UserProfile[]>([]);
   const [submissions, setSubmissions] = useState<AssignmentSubmission[]>([]);
   const [activeTab, setActiveTab] = useState<'materials' | 'teachers' | 'grading'>('materials');
@@ -86,10 +87,12 @@ export default function AdminDashboard() {
       (error) => handleFirestoreError(error, OperationType.LIST, 'materials'),
     );
 
-    const unsubTeachers = onSnapshot(
-      query(collection(db, 'users'), where('role', '==', 'teacher')),
+    const unsubUsers = onSnapshot(
+      collection(db, 'users'),
       (snapshot) => {
-        setTeachers(snapshot.docs.map((item) => ({ uid: item.id, ...item.data() })) as UserProfile[]);
+        const users = snapshot.docs.map((item) => ({ uid: item.id, ...item.data() })) as UserProfile[];
+        setAllUsers(users);
+        setTeachers(users.filter((user) => user.role === 'teacher' && !user.archived));
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'users'),
     );
@@ -104,7 +107,7 @@ export default function AdminDashboard() {
 
     return () => {
       unsubMaterials();
-      unsubTeachers();
+      unsubUsers();
       unsubSubmissions();
     };
   }, []);
@@ -114,10 +117,10 @@ export default function AdminDashboard() {
       return;
     }
 
-    syncTrainingDerivedData(db, teachers, materials, submissions).catch((error) => {
+    syncTrainingDerivedData(db, allUsers, materials, submissions).catch((error) => {
       console.error('Failed to sync derived training data:', error);
     });
-  }, [loading, teachers, materials, submissions]);
+  }, [loading, allUsers, materials, submissions]);
 
   const teacherProgressMap = useMemo(
     () => new Map(teachers.map((teacher) => [teacher.uid, getTeacherProgress(teacher, materials, submissions)])),

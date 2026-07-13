@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { GenderDistributionItem, StateGrowthStats, TrainingStats } from '../types';
+import { GenderDistributionItem, GrowthRole, RoleDashboardStats, StateGrowthStats, TrainingStats } from '../types';
 import { CheckCircle, Users, Map, Trophy, UserCheck, Medal, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -16,10 +16,12 @@ function getPiePath(cx: number, cy: number, radius: number, startAngle: number, 
 
 function GenderPieChart({
   data,
+  centerLabel = 'People',
   onSliceHover,
   onSliceLeave,
 }: {
   data: GenderDistributionItem[];
+  centerLabel?: string;
   onSliceHover: (item: GenderDistributionItem) => void;
   onSliceLeave: () => void;
 }) {
@@ -54,10 +56,54 @@ function GenderPieChart({
         {total}
       </text>
       <text x="130" y="148" textAnchor="middle" fontSize="12" fill="#6b7280">
-        Teachers
+        {centerLabel}
       </text>
     </svg>
   );
+}
+
+const roleFilterOptions: { value: GrowthRole; label: string; shortLabel: string }[] = [
+  { value: 'teacher', label: 'Teachers', shortLabel: 'Teacher' },
+  { value: 'trainer', label: 'Trainers', shortLabel: 'Trainer' },
+  { value: 'senior-trainer', label: 'Senior Trainers', shortLabel: 'Senior' },
+  { value: 'master-trainer', label: 'Master Trainers', shortLabel: 'Master' },
+];
+
+function RoleFilter({
+  value,
+  onChange,
+}: {
+  value: GrowthRole;
+  onChange: (role: GrowthRole) => void;
+}) {
+  return (
+    <div className="inline-flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-gray-50 p-1">
+      {roleFilterOptions.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
+            value === option.value ? 'bg-dltt-green text-white shadow-sm' : 'text-gray-600 hover:bg-white'
+          }`}
+        >
+          <span className="hidden sm:inline">{option.label}</span>
+          <span className="sm:hidden">{option.shortLabel}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function getEmptyRoleBreakdown(): RoleDashboardStats {
+  return {
+    stateDistribution: [],
+    genderDistribution: [
+      { label: 'Male', count: 0, color: '#2e9107' },
+      { label: 'Female', count: 0, color: '#ebe725' },
+    ],
+    leaderboard: [],
+  };
 }
 
 const southwestMapShapes = [
@@ -243,6 +289,7 @@ export default function PublicDashboard() {
   const [selectedState, setSelectedState] = useState('');
   const [hoveredState, setHoveredState] = useState('');
   const [hoveredGender, setHoveredGender] = useState<GenderDistributionItem | null>(null);
+  const [selectedRole, setSelectedRole] = useState<GrowthRole>('teacher');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, 'stats', 'global'), (doc) => {
@@ -256,10 +303,21 @@ export default function PublicDashboard() {
   }, []);
 
   useEffect(() => {
-    if (stats?.teachersByState?.length) {
-      setSelectedState((current) => current || stats.teachersByState[0].state);
+    const selectedDistribution =
+      stats?.roleBreakdowns?.[selectedRole]?.stateDistribution ||
+      (selectedRole === 'teacher' ? stats?.teachersByState : []) ||
+      [];
+
+    if (selectedDistribution.length) {
+      setSelectedState((current) => {
+        if (current && selectedDistribution.some((item) => item.state === current)) {
+          return current;
+        }
+
+        return selectedDistribution[0].state;
+      });
     }
-  }, [stats]);
+  }, [selectedRole, stats]);
 
   if (loading) {
     return (
@@ -269,10 +327,20 @@ export default function PublicDashboard() {
     );
   }
 
-  const maleCount = stats?.genderDistribution?.find((item) => item.label === 'Male')?.count || 0;
-  const femaleCount = stats?.genderDistribution?.find((item) => item.label === 'Female')?.count || 0;
-  const genderTotal = stats?.genderDistribution?.reduce((sum, item) => sum + item.count, 0) || 0;
-  const maxStateCount = Math.max(1, ...(stats?.teachersByState?.map((item) => item.count) || [1]));
+  const selectedRoleBreakdown =
+    stats?.roleBreakdowns?.[selectedRole] ||
+    (selectedRole === 'teacher'
+      ? {
+          stateDistribution: stats?.teachersByState || [],
+          genderDistribution: stats?.genderDistribution || getEmptyRoleBreakdown().genderDistribution,
+          leaderboard: stats?.teacherLeaderboard || [],
+        }
+      : getEmptyRoleBreakdown());
+  const selectedRoleLabel = roleFilterOptions.find((option) => option.value === selectedRole)?.label || 'Participants';
+  const maleCount = selectedRoleBreakdown.genderDistribution.find((item) => item.label === 'Male')?.count || 0;
+  const femaleCount = selectedRoleBreakdown.genderDistribution.find((item) => item.label === 'Female')?.count || 0;
+  const genderTotal = selectedRoleBreakdown.genderDistribution.reduce((sum, item) => sum + item.count, 0);
+  const maxStateCount = Math.max(1, ...(selectedRoleBreakdown.stateDistribution.map((item) => item.count) || [1]));
   const growthByState: StateGrowthStats[] =
     stats?.growthByState?.length
       ? stats.growthByState
@@ -288,7 +356,7 @@ export default function PublicDashboard() {
   const cards = [
     { title: 'Total Teachers', value: stats?.enrollment || 0, icon: Users, color: 'bg-blue-50 text-blue-600' },
     { title: 'Active Teachers', value: stats?.activeTeachers || 0, icon: Trophy, color: 'bg-yellow-50 text-yellow-600' },
-    { title: 'States Covered', value: stats?.teachersByState?.length || 0, icon: Map, color: 'bg-purple-50 text-purple-600' },
+    { title: 'States Covered', value: growthByState.filter((state) => state.total > 0).length, icon: Map, color: 'bg-purple-50 text-purple-600' },
     { title: 'Completion Rate', value: `${stats?.completionRate || 0}%`, icon: CheckCircle, color: 'bg-green-50 text-green-600' },
     { title: 'Trainers', value: stats?.trainerCount || 0, icon: UserCheck, color: 'bg-emerald-50 text-emerald-600' },
     { title: 'Senior Trainers', value: stats?.seniorTrainerCount || 0, icon: Medal, color: 'bg-amber-50 text-amber-600' },
@@ -337,15 +405,18 @@ export default function PublicDashboard() {
           animate={{ opacity: 1, y: 0 }}
           className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100"
         >
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col gap-4 mb-6 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Teacher Distribution by State</h2>
-              <p className="text-sm text-gray-500">Compare state-level teacher coverage and activity.</p>
+              <h2 className="text-xl font-bold text-gray-900">Distribution by State</h2>
+              <p className="text-sm text-gray-500">Compare state-level coverage and activity by growth level.</p>
             </div>
-            <Map className="text-dltt-green" />
+            <div className="flex items-center gap-3">
+              <RoleFilter value={selectedRole} onChange={setSelectedRole} />
+              <Map className="hidden text-dltt-green sm:block" />
+            </div>
           </div>
           <div className="space-y-4">
-            {stats?.teachersByState?.map((state) => (
+            {selectedRoleBreakdown.stateDistribution.map((state) => (
               <button
                 key={state.state}
                 type="button"
@@ -377,7 +448,9 @@ export default function PublicDashboard() {
                 )}
                 <div className="flex items-center justify-between gap-3 text-sm font-semibold text-gray-900">
                   <span>{state.state}</span>
-                  <span>{state.count} teachers</span>
+                  <span>
+                    {state.count} {state.count === 1 ? selectedRoleLabel.replace(/s$/, '') : selectedRoleLabel.toLowerCase()}
+                  </span>
                 </div>
                 <div className="mt-3 h-3 bg-gray-100 rounded-full overflow-hidden">
                   <div
@@ -387,6 +460,9 @@ export default function PublicDashboard() {
                 </div>
               </button>
             ))}
+            {selectedRoleBreakdown.stateDistribution.length === 0 && (
+              <p className="text-center text-gray-500 py-8">No data available for {selectedRoleLabel.toLowerCase()} yet.</p>
+            )}
           </div>
         </motion.div>
 
@@ -395,17 +471,21 @@ export default function PublicDashboard() {
           animate={{ opacity: 1, y: 0 }}
           className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-full"
         >
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex flex-col gap-4 mb-5 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Teacher Gender Share</h2>
-              <p className="text-sm text-gray-500">Live teacher distribution by gender.</p>
+              <h2 className="text-xl font-bold text-gray-900">Gender Distribution</h2>
+              <p className="text-sm text-gray-500">Live gender distribution by growth level.</p>
             </div>
-            <Trophy className="text-dltt-green" />
+            <div className="flex items-center gap-3">
+              <RoleFilter value={selectedRole} onChange={setSelectedRole} />
+              <Trophy className="hidden text-dltt-green sm:block" />
+            </div>
           </div>
           <div className="flex flex-col items-center gap-6">
             <div className="relative w-full flex justify-center">
               <GenderPieChart
-                data={stats?.genderDistribution || []}
+                data={selectedRoleBreakdown.genderDistribution}
+                centerLabel={selectedRoleLabel}
                 onSliceHover={(item) => setHoveredGender(item)}
                 onSliceLeave={() => setHoveredGender(null)}
               />
@@ -413,7 +493,7 @@ export default function PublicDashboard() {
                 <div className="absolute left-1/2 top-4 -translate-x-1/2 z-10 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-xl text-center text-sm text-gray-700">
                   <p className="font-semibold text-gray-900">{hoveredGender.label}</p>
                   <p className="mt-1">
-                    {hoveredGender.count} teachers
+                    {hoveredGender.count} {hoveredGender.count === 1 ? selectedRoleLabel.replace(/s$/, '') : selectedRoleLabel.toLowerCase()}
                     {genderTotal > 0 ? ` · ${Math.round((hoveredGender.count / genderTotal) * 100)}%` : ''}
                   </p>
                 </div>
@@ -444,12 +524,18 @@ export default function PublicDashboard() {
           animate={{ opacity: 1, x: 0 }}
           className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100"
         >
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Top Performing Teachers</h2>
-            <Trophy className="text-dltt-yellow" />
+          <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Top Performers</h2>
+              <p className="text-sm text-gray-500">Highest scoring participants by growth level.</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <RoleFilter value={selectedRole} onChange={setSelectedRole} />
+              <Trophy className="hidden text-dltt-yellow sm:block" />
+            </div>
           </div>
           <div className="space-y-4">
-            {stats?.teacherLeaderboard?.slice(0, 5).map((teacher, index) => (
+            {selectedRoleBreakdown.leaderboard.slice(0, 5).map((teacher, index) => (
               <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
                 <div className="flex items-center space-x-4">
                   <span className="text-lg font-bold text-gray-400 w-6">#{index + 1}</span>
@@ -461,8 +547,8 @@ export default function PublicDashboard() {
                 <span className="font-bold text-dltt-green">{teacher.score} pts</span>
               </div>
             ))}
-            {(!stats?.teacherLeaderboard || stats.teacherLeaderboard.length === 0) && (
-              <p className="text-center text-gray-500 py-8">No data available yet.</p>
+            {selectedRoleBreakdown.leaderboard.length === 0 && (
+              <p className="text-center text-gray-500 py-8">No data available for {selectedRoleLabel.toLowerCase()} yet.</p>
             )}
           </div>
         </motion.div>
@@ -477,6 +563,9 @@ export default function PublicDashboard() {
             <h2 className="text-xl font-bold text-gray-900">State Performance</h2>
             <Map className="text-dltt-green" />
           </div>
+          <p className="text-sm text-gray-500 -mt-4 mb-6">
+            Overall completion performance across teachers, trainers, senior trainers, and master trainers.
+          </p>
           <div className="space-y-4">
             {stats?.stateLeaderboard?.map((state, index) => (
               <div key={index} className="space-y-2">

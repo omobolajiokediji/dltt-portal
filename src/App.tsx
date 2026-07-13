@@ -55,6 +55,7 @@ export default function App() {
           role: 'super-admin',
           state: 'Lagos State',
           approvedForCertificate: true,
+          archived: false,
           totalScore: 0,
           attendance: {},
           assignmentCompletion: {},
@@ -65,7 +66,10 @@ export default function App() {
 
       const userSnapshot = await getDoc(userDocRef);
       if (userSnapshot.exists()) {
-        await setDoc(userDocRef, { lastLoginAt: new Date().toISOString() }, { merge: true });
+        const userData = userSnapshot.data() as UserProfile;
+        if (!userData.archived) {
+          await setDoc(userDocRef, { lastLoginAt: new Date().toISOString() }, { merge: true });
+        }
       }
 
       unsubscribeUserDoc = onSnapshot(
@@ -81,6 +85,13 @@ export default function App() {
           }
 
           const userData = userDoc.data() as UserProfile;
+          if (userData.archived && userData.role !== 'super-admin' && userData.role !== 'admin') {
+            setUser(null);
+            setAuthIssue('This portal profile has been archived. Please contact your coordinator if you need access restored.');
+            setLoading(false);
+            return;
+          }
+
           setUser(
             isSuperAdminEmail
               ? { ...userData, role: 'super-admin', approvedForCertificate: true }

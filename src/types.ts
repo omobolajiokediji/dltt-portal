@@ -17,6 +17,9 @@ export interface UserProfile {
   trainerId?: string;
   createdBy?: string;
   promotedAt?: string;
+  archived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
   school?: string;
   gender?: string;
   lastLoginAt?: string;
@@ -98,6 +101,12 @@ export interface StateGrowthStats {
   total: number;
 }
 
+export interface RoleDashboardStats {
+  stateDistribution: TeacherStateStats[];
+  genderDistribution: GenderDistributionItem[];
+  leaderboard: { name: string; score: number; state: string }[];
+}
+
 export interface TrainingStats {
   enrollment: number;
   trainerCount: number;
@@ -110,6 +119,7 @@ export interface TrainingStats {
   teachersByState: TeacherStateStats[];
   growthByState: StateGrowthStats[];
   teacherLeaderboard: { name: string; score: number; state: string }[];
+  roleBreakdowns?: Partial<Record<GrowthRole, RoleDashboardStats>>;
   levelLeaderboards: {
     role: GrowthRole;
     title: string;
