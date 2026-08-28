@@ -129,6 +129,16 @@ const growthLevelLabels: Record<GrowthRole, string> = {
   'master-trainer': 'Master Trainer',
 };
 
+type DownloadUserRole = 'all' | GrowthRole;
+
+const downloadableUserRoles: { value: DownloadUserRole; label: string }[] = [
+  { value: 'all', label: 'All Users' },
+  { value: 'teacher', label: 'Teachers' },
+  { value: 'trainer', label: 'Trainers' },
+  { value: 'senior-trainer', label: 'Senior Trainers' },
+  { value: 'master-trainer', label: 'Master Trainers' },
+];
+
 const nextGrowthRole: Partial<Record<UserRole, UserRole>> = {
   teacher: 'trainer',
   trainer: 'senior-trainer',
@@ -246,6 +256,7 @@ export default function SuperAdminDashboard({
   const [expandedMaterialWeeks, setExpandedMaterialWeeks] = useState<Set<number>>(new Set(WEEKS));
   const [newMaterial, setNewMaterial] = useState<MaterialFormState>(defaultMaterialState);
   const [newUser, setNewUser] = useState<Partial<UserProfile>>(defaultNewUser);
+  const [downloadRole, setDownloadRole] = useState<DownloadUserRole>('teacher');
   const [gradeDrafts, setGradeDrafts] = useState<GradeDraftState>({});
   const [promotionSearchTerm, setPromotionSearchTerm] = useState('');
   const [selectedPromotionIds, setSelectedPromotionIds] = useState<Set<string>>(new Set());
@@ -420,11 +431,12 @@ export default function SuperAdminDashboard({
   const filteredUsers = users.filter((user) => {
     const searchValue = searchTerm.toLowerCase();
     return (
-      user.name.toLowerCase().includes(searchValue) ||
-      user.email.toLowerCase().includes(searchValue) ||
-      user.state.toLowerCase().includes(searchValue) ||
-      (user.archived ? 'archived' : 'active').includes(searchValue) ||
-      (user.phone || '').includes(searchTerm)
+      (downloadRole === 'all' || user.role === downloadRole) &&
+      (user.name.toLowerCase().includes(searchValue) ||
+        user.email.toLowerCase().includes(searchValue) ||
+        user.state.toLowerCase().includes(searchValue) ||
+        (user.archived ? 'archived' : 'active').includes(searchValue) ||
+        (user.phone || '').includes(searchTerm))
     );
   });
 
@@ -440,6 +452,8 @@ export default function SuperAdminDashboard({
   const trainerCount = activeUsers.filter((user) => user.role === 'trainer').length;
   const seniorTrainerCount = activeUsers.filter((user) => user.role === 'senior-trainer').length;
   const masterTrainerCount = activeUsers.filter((user) => user.role === 'master-trainer').length;
+  const selectedDownloadRoleLabel =
+    downloadableUserRoles.find((option) => option.value === downloadRole)?.label || 'Selected Users';
   const promotionCandidates = activeUsers
     .filter((user) => canPromoteRole(user.role))
     .filter((user) => {
@@ -834,22 +848,31 @@ export default function SuperAdminDashboard({
   };
 
   const handleDownloadTeachers = () => {
-    const teachers = activeUsers.filter((user) => user.role === 'teacher');
-    const data = teachers.map((teacher) => ({
-      'Full Name': teacher.name,
-      State: teacher.state,
-      Gender: teacher.gender || '',
-      Email: teacher.email,
-      'Phone Number': teacher.phone,
-      'Account Number': teacher.accountNumber || '',
-      'Account Name': teacher.accountName || '',
-      'Bank Name': teacher.bank || '',
+    const selectedRoleLabel = selectedDownloadRoleLabel;
+    const selectedUsers =
+      downloadRole === 'all' ? activeUsers : activeUsers.filter((user) => user.role === downloadRole);
+
+    if (!selectedUsers.length) {
+      setNotification({ message: `No ${selectedRoleLabel.toLowerCase()} data available to download.`, type: 'error' });
+      return;
+    }
+
+    const data = selectedUsers.map((user) => ({
+      'Full Name': user.name,
+      Role: getRoleLabel(user.role),
+      State: user.state,
+      Gender: user.gender || '',
+      Email: user.email,
+      'Phone Number': user.phone,
+      'Account Number': user.accountNumber || '',
+      'Account Name': user.accountName || '',
+      'Bank Name': user.bank || '',
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Teachers');
-    XLSX.writeFile(workbook, 'teachers-data.xlsx');
+    XLSX.utils.book_append_sheet(workbook, worksheet, selectedRoleLabel);
+    XLSX.writeFile(workbook, `${downloadRole}-data.xlsx`);
   };
 
   const handleUpdateUser = async (e: React.FormEvent) => {
@@ -1975,13 +1998,30 @@ export default function SuperAdminDashboard({
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-8">
             <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/30">
               <h2 className="text-xl font-bold text-gray-900">User Management</h2>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+                  <label htmlFor="download-role" className="text-sm font-bold text-gray-600 whitespace-nowrap">
+                    View
+                  </label>
+                  <select
+                    id="download-role"
+                    value={downloadRole}
+                    onChange={(event) => setDownloadRole(event.target.value as DownloadUserRole)}
+                    className="bg-transparent text-sm font-semibold text-gray-900 outline-none"
+                  >
+                    {downloadableUserRoles.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <button
                   onClick={handleDownloadTeachers}
-                  className="flex items-center space-x-2 px-4 py-2 bg-dltt-green text-white rounded-xl font-bold hover:opacity-90 transition-opacity"
+                  className="flex items-center justify-center space-x-2 px-4 py-2 bg-dltt-green text-white rounded-xl font-bold hover:opacity-90 transition-opacity"
                 >
                   <FileSpreadsheet size={18} />
-                  <span>Download Teachers</span>
+                  <span>Download {selectedDownloadRoleLabel}</span>
                 </button>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
@@ -1999,7 +2039,7 @@ export default function SuperAdminDashboard({
               columns={userColumns}
               rows={filteredUsers}
               rowKey={(user) => user.uid}
-              emptyMessage="No users match your current search."
+              emptyMessage={`No ${selectedDownloadRoleLabel.toLowerCase()} match your current search.`}
               initialPageSize={10}
             />
           </div>
