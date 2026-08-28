@@ -7,6 +7,15 @@ export interface CertificationApproval {
   approvedBy?: string;
 }
 
+export interface PerformanceSnapshot {
+  totalScore: number;
+  completionRate: number;
+  attendanceCount: number;
+  completedWeeklyTests: number;
+  submittedAssignments: number;
+  capturedAt: string;
+}
+
 export interface UserProfile {
   uid: string;
   name: string;
@@ -27,6 +36,7 @@ export interface UserProfile {
   certificateName?: string;
   approvedForCertificate: boolean;
   certifications?: Partial<Record<GrowthRole, CertificationApproval>>;
+  performanceHistory?: Partial<Record<GrowthRole, PerformanceSnapshot>>;
   totalScore: number;
   attendance: Record<string, boolean>; // e.g., { 'week1': true }
   assignmentCompletion: Record<string, boolean>; // e.g., { 'materialId': true }

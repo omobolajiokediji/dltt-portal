@@ -1,6 +1,6 @@
 import { Firestore, collection, doc, writeBatch } from 'firebase/firestore';
 import { STATES, WEEKS } from '../constants';
-import { AssignmentSubmission, GrowthRole, LearningMaterial, TrainingStats, UserProfile } from '../types';
+import { AssignmentSubmission, GrowthRole, LearningMaterial, PerformanceSnapshot, TrainingStats, UserProfile } from '../types';
 
 type UserLike = Pick<UserProfile, 'uid' | 'state'>;
 
@@ -21,6 +21,11 @@ export interface TeacherProgress {
   attendanceCount: number;
   attendanceRate: number;
   assignmentCompletion: Record<string, boolean>;
+}
+
+interface CumulativeProgress {
+  completionRate: number;
+  totalScore: number;
 }
 
 function getTimestamp(value: string | undefined) {
@@ -121,6 +126,32 @@ export function getTeacherProgress(
   };
 }
 
+export function buildPerformanceSnapshot(progress: TeacherProgress, capturedAt = new Date().toISOString()): PerformanceSnapshot {
+  return {
+    totalScore: progress.totalScore,
+    completionRate: progress.completionRate,
+    attendanceCount: progress.attendanceCount,
+    completedWeeklyTests: progress.completedWeeklyTests,
+    submittedAssignments: progress.submittedAssignments,
+    capturedAt,
+  };
+}
+
+function getHistoricalSnapshots(user: UserProfile) {
+  return Object.values(user.performanceHistory || {}).filter(Boolean) as PerformanceSnapshot[];
+}
+
+function getCumulativeProgress(user: UserProfile, currentProgress: TeacherProgress): CumulativeProgress {
+  const snapshots = getHistoricalSnapshots(user);
+  const completionEntries = [...snapshots.map((snapshot) => snapshot.completionRate), currentProgress.completionRate];
+  const historicalScore = snapshots.reduce((sum, snapshot) => sum + (snapshot.totalScore || 0), 0);
+
+  return {
+    completionRate: completionEntries.length ? Math.max(...completionEntries) : 0,
+    totalScore: historicalScore + currentProgress.totalScore,
+  };
+}
+
 export function buildTrainingStats(
   users: UserProfile[],
   materials: LearningMaterial[],
@@ -136,9 +167,11 @@ export function buildTrainingStats(
   const masterTrainerCount = activeUsers.filter((user) => user.role === 'master-trainer').length;
   const growthProgress = activeGrowthUsers.map((user) => {
     const progress = getTeacherProgress(user, materials, submissions);
+    const cumulativeProgress = getCumulativeProgress(user, progress);
     return {
       user,
       progress,
+      cumulativeProgress,
     };
   });
   const teacherProgress = growthProgress
@@ -146,6 +179,7 @@ export function buildTrainingStats(
     .map((entry) => ({
       teacher: entry.user,
       progress: entry.progress,
+      cumulativeProgress: entry.cumulativeProgress,
     }));
 
   const enrollment = teachers.length;
@@ -153,7 +187,7 @@ export function buildTrainingStats(
   const completionRate =
     growthProgress.length > 0
       ? Math.round(
-          growthProgress.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / growthProgress.length,
+          growthProgress.reduce((sum, entry) => sum + entry.cumulativeProgress.completionRate, 0) / growthProgress.length,
         )
       : 0;
 
@@ -163,9 +197,9 @@ export function buildTrainingStats(
   ];
 
   const teacherLeaderboard = teacherProgress
-    .map(({ teacher, progress }) => ({
+    .map(({ teacher, cumulativeProgress }) => ({
       name: teacher.name,
-      score: progress.totalScore,
+      score: cumulativeProgress.totalScore,
       state: teacher.state,
     }))
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
@@ -179,10 +213,10 @@ export function buildTrainingStats(
       const count = stateEntries.length;
       const activeCount = stateEntries.filter((entry) => !!entry.user.lastLoginAt).length;
       const avgScore = count
-        ? Math.round(stateEntries.reduce((sum, entry) => sum + entry.progress.totalScore, 0) / count)
+        ? Math.round(stateEntries.reduce((sum, entry) => sum + entry.cumulativeProgress.totalScore, 0) / count)
         : 0;
       const completionRateByState = count
-        ? Math.round(stateEntries.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / count)
+        ? Math.round(stateEntries.reduce((sum, entry) => sum + entry.cumulativeProgress.completionRate, 0) / count)
         : 0;
 
       return {
@@ -203,9 +237,9 @@ export function buildTrainingStats(
     ];
 
     const leaderboard = roleProgress
-      .map(({ user, progress }) => ({
+      .map(({ user, cumulativeProgress }) => ({
         name: user.name,
-        score: progress.totalScore,
+        score: cumulativeProgress.totalScore,
         state: user.state,
       }))
       .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
@@ -233,9 +267,10 @@ export function buildTrainingStats(
       performers: levelUsers
         .map((levelUser) => {
           const progress = getTeacherProgress(levelUser, materials, submissions);
+          const cumulativeProgress = getCumulativeProgress(levelUser, progress);
           return {
             name: levelUser.name,
-            score: progress.totalScore,
+            score: cumulativeProgress.totalScore,
             state: levelUser.state,
           };
         })
@@ -251,7 +286,7 @@ export function buildTrainingStats(
     }
 
     const score = Math.round(
-      stateEntries.reduce((sum, entry) => sum + entry.progress.completionRate, 0) / stateEntries.length,
+      stateEntries.reduce((sum, entry) => sum + entry.cumulativeProgress.completionRate, 0) / stateEntries.length,
     );
 
     return { state, score };

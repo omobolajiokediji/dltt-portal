@@ -57,7 +57,7 @@ import {
   saveTeacherProfileEditingDisabled,
   subscribeToPortalSettings,
 } from '../lib/portalSettings';
-import { getTeacherProgress, syncTrainingDerivedData } from '../lib/training';
+import { buildPerformanceSnapshot, getTeacherProgress, syncTrainingDerivedData } from '../lib/training';
 import { parseAssessmentImportFile } from '../lib/submissionImport';
 import ConfirmDialog from './ConfirmDialog';
 import DataTable, { DataTableColumn } from './DataTable';
@@ -936,9 +936,14 @@ export default function SuperAdminDashboard({
           return;
         }
 
+        const progress = getTeacherProgress(selectedUser, materials, submissions);
         batch.update(doc(db, 'users', selectedUser.uid), {
           role: nextRole,
           promotedAt,
+          performanceHistory: {
+            ...(selectedUser.performanceHistory || {}),
+            [selectedUser.role]: buildPerformanceSnapshot(progress, promotedAt),
+          },
           trainerId: deleteField(),
         });
       });

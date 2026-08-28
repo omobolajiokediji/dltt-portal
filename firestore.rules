@@ -26,6 +26,7 @@ service cloud.firestore {
     //   - archived: bool (optional; Admin/SuperAdmin managed)
     //   - archivedAt: string (optional; Admin/SuperAdmin managed)
     //   - archivedBy: string (optional; Admin/SuperAdmin managed)
+    //   - performanceHistory: map (optional; Admin/SuperAdmin managed)
     //
     // Collection: materials
     // Document ID: materialId
@@ -167,6 +168,13 @@ service cloud.firestore {
              isAdmin();
     }
 
+    function performanceHistoryChangeAllowed() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+               'performanceHistory'
+             ]) ||
+             isAdmin();
+    }
+
     function isValidMaterial(data) {
       return data.keys().hasAll(['id', 'title', 'type', 'contentUrl', 'week']) &&
              data.title is string && data.title.size() < 200 &&
@@ -244,7 +252,8 @@ service cloud.firestore {
       allow update: if ((isAdmin() || isSuperAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role)) &&
                         isValidUser(request.resource.data) &&
                         certificateApprovalChangeAllowed() &&
-                        archiveChangeAllowed()) ||
+                        archiveChangeAllowed() &&
+                        performanceHistoryChangeAllowed()) ||
                        trainerCanUpdateManagedTeacher(userId);
       allow delete: if isAdmin() || isSuperAdmin();
     }
